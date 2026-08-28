@@ -107,6 +107,7 @@
   .muted{font-size:12px;line-height:1.8;color:var(--ink-soft);letter-spacing:.06em;margin:12px 0 0}
   .modes{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
   .modes .go{margin-top:26px}
+  #end .modes .go{padding:13px 20px;letter-spacing:.14em}
   .tabs{display:flex;gap:0;margin-bottom:2px}
   .tab{
     flex:1;background:none;border:none;border-bottom:2px solid rgba(27,26,23,.18);
@@ -215,6 +216,7 @@
     <div class="modes">
       <button class="go serif" id="btnAgain">再來</button>
       <button class="go serif" id="btnMeta2">修行</button>
+      <button class="go serif" id="btnHome">回主頁</button>
     </div>
   </div>
 </div>
@@ -224,7 +226,7 @@
 (() => {
 "use strict";
 
-const VER = "v0.6";
+const VER = "v0.6.1";
 document.getElementById("verTag").textContent = VER;
 
 // ─────────────────────────── 畫布 ───────────────────────────
@@ -1028,10 +1030,15 @@ function renderMeta(){
     UI.mList.appendChild(w);
   }
 }
-const openMeta = () => { renderMeta(); showVeil(UI.meta); state = 'menu'; };
-document.getElementById('btnMeta').onclick  = openMeta;
-document.getElementById('btnMeta2').onclick = openMeta;
-document.getElementById('btnMetaBack').onclick = () => { showVeil(UI.start); state = 'menu'; };
+const openMeta = from => () => { metaFrom = from; renderMeta(); showVeil(UI.meta); state = 'menu'; };
+document.getElementById('btnMeta').onclick  = openMeta('start');
+document.getElementById('btnMeta2').onclick = openMeta('end');
+document.getElementById('btnHome').onclick  = () => { showVeil(UI.start); state = 'menu'; };
+let metaFrom = 'start';
+document.getElementById('btnMetaBack').onclick = () => {
+  showVeil(metaFrom === 'end' ? UI.end : UI.start);
+  state = 'menu';
+};
 
 document.getElementById('btnPeek').onclick = () => {
   lastRun = null; myId = null; syncTabs();
