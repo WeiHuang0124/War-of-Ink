@@ -120,6 +120,25 @@
     padding:8px;margin-top:14px;
   }
   .link:hover{color:var(--zhu)}
+  #meta .plate{width:100%;max-width:560px}
+  .mrow{
+    display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;
+    padding:12px 2px;border-bottom:1px solid rgba(27,26,23,.12);
+  }
+  .mrow .mn{font-size:17px;font-weight:900;letter-spacing:.06em}
+  .mrow .md{font-size:12px;color:var(--ink-soft);line-height:1.7}
+  .dots{display:flex;gap:4px;margin-top:5px}
+  .dot{width:7px;height:7px;border:1.5px solid var(--ink);opacity:.35}
+  .dot.on{background:var(--zhu);border-color:var(--zhu);opacity:1}
+  .buy{
+    border:2px solid var(--ink);background:none;font:inherit;font-size:13px;font-weight:700;
+    padding:8px 14px;cursor:pointer;letter-spacing:.1em;white-space:nowrap;
+  }
+  .buy:hover:not(:disabled){background:var(--ink);color:var(--paper)}
+  .buy:disabled{opacity:.3;cursor:default}
+  .pts{font-size:13px;letter-spacing:.1em;color:var(--ink-soft)}
+  .pts b{font-size:22px;color:var(--zhu);font-weight:900;letter-spacing:0}
+  .rrbar{margin-top:14px;text-align:right}
   .ver{position:fixed;right:12px;bottom:10px;font-size:11px;letter-spacing:.14em;
        color:var(--ink-soft);opacity:.6;z-index:20;pointer-events:none}
   .verdict{font-size:clamp(58px,15vw,108px);margin:0;font-weight:900;letter-spacing:.15em}
@@ -144,7 +163,10 @@
       <button class="go serif" id="btnEndless">無　盡</button>
     </div>
     <p class="keys">WASD／方向鍵移動 · 自動出筆 · 手機直接拖曳</p>
-    <div><button class="link" id="btnPeek">觀榜</button></div>
+    <div>
+      <button class="link" id="btnMeta">修行</button>
+      <button class="link" id="btnPeek">觀榜</button>
+    </div>
   </div>
 </div>
 
@@ -154,6 +176,18 @@
       <h2 class="serif">添筆</h2><small>選一項　按 1 2 3 也行</small>
     </div>
     <div id="cards"></div>
+    <div class="rrbar"><button class="link" id="btnReroll">重抽　剩 <b id="rrLeft">0</b> 次</button></div>
+  </div>
+</div>
+
+<div class="veil" id="meta">
+  <div class="plate">
+    <div class="lvl-head">
+      <h2 class="serif">修　行</h2>
+      <small class="pts">筆意 <b id="mPts">0</b></small>
+    </div>
+    <div id="mList"></div>
+    <button class="go serif" id="btnMetaBack">回　去</button>
   </div>
 </div>
 
@@ -164,6 +198,7 @@
       <div class="stat"><b id="sTime">0:00</b><span>撐住</span></div>
       <div class="stat"><b id="sKill">0</b><span>化開的墨</span></div>
       <div class="stat"><b id="sLv">1</b><span>筆力</span></div>
+      <div class="stat"><b id="sGain">+0</b><span>筆意</span></div>
     </div>
     <div class="namebox" id="nameBox">
       <input id="nameIn" maxlength="8" placeholder="留個名號" autocomplete="off" spellcheck="false">
@@ -177,7 +212,10 @@
       <div id="rows"></div>
       <p class="muted" id="boardMsg">讀取中…</p>
     </div>
-    <button class="go serif" id="btnAgain">再來</button>
+    <div class="modes">
+      <button class="go serif" id="btnAgain">再來</button>
+      <button class="go serif" id="btnMeta2">修行</button>
+    </div>
   </div>
 </div>
 <div class="ver" id="verTag"></div>
@@ -186,7 +224,7 @@
 (() => {
 "use strict";
 
-const VER = "v0.5";
+const VER = "v0.6";
 document.getElementById("verTag").textContent = VER;
 
 // ─────────────────────────── 畫布 ───────────────────────────
@@ -237,6 +275,7 @@ window.addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   keys[k] = true;
   if ([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k)) e.preventDefault();
+  if (state === 'levelup' && k === 'r') reroll();
   if (state === 'levelup' && '123'.includes(k)) {
     const i = +k - 1;
     if (pendingCards[i]) choose(pendingCards[i]);
@@ -293,6 +332,10 @@ const UI = {
   sTime: document.getElementById('sTime'),
   sKill: document.getElementById('sKill'),
   sLv:   document.getElementById('sLv'),
+  sGain: document.getElementById('sGain'),
+  meta:  document.getElementById('meta'),
+  mPts:  document.getElementById('mPts'),
+  mList: document.getElementById('mList'),
   nameBox: document.getElementById('nameBox'),
   nameIn:  document.getElementById('nameIn'),
   btnPost: document.getElementById('btnPost'),
@@ -301,11 +344,12 @@ const UI = {
   boardMsg:document.getElementById('boardMsg'),
   boardTitle: document.getElementById('boardTitle')
 };
-const showVeil = el => { for (const k of ['start','lvl','end']) UI[k].classList.toggle('on', UI[k] === el); };
-const hideVeils = () => { for (const k of ['start','lvl','end']) UI[k].classList.remove('on'); };
+const VEILS = ['start','lvl','end','meta'];
+const showVeil = el => { for (const k of VEILS) UI[k].classList.toggle('on', UI[k] === el); };
+const hideVeils = () => { for (const k of VEILS) UI[k].classList.remove('on'); };
 
 let state = 'menu', paused = false;
-let p, enemies, bullets, foeShots, orbs, motes, novas, big;
+let p, enemies, bullets, foeShots, orbs, motes, novas, big, slashes;
 let T, kills, spawnT, shake, shakeT, bossQueue, camX, camY;
 let pendingCards = [];
 let banner = null;
@@ -313,13 +357,41 @@ let MODE = 'timed';                       // 'timed' | 'endless'
 let nextBoss = 0, bossCount = 0;
 const GOAL = 300; // 五分鐘
 
+// ─────────────────────────── 場外修行 ───────────────────────────
+const META_KEY = 'war-of-ink.meta.v1';
+const META = [
+  {id:'base_hp', name:'底墨', desc:'每級起始生命 +15',        max:5, cost:l=>3+l*2},
+  {id:'edge',    name:'開鋒', desc:'每級起始傷害 +8%',        max:5, cost:l=>4+l*3},
+  {id:'stride',  name:'疾步', desc:'每級移動速度 +4%',        max:4, cost:l=>4+l*3},
+  {id:'reach',   name:'廣納', desc:'每級拾取範圍 +15%',       max:4, cost:l=>3+l*2},
+  {id:'reroll',  name:'重抽', desc:'每級每場多一次重抽添筆',  max:3, cost:l=>6+l*6},
+  {id:'guard',   name:'護心', desc:'每級受傷後無敵 +0.12 秒', max:3, cost:l=>5+l*4},
+  {id:'insight', name:'先機', desc:'每級開場直接添一筆',      max:2, cost:l=>12+l*12}
+];
+let meta = {pts:0, lv:{}, runs:0};
+let metaOK = true;                      // localStorage 不能用時（無痕、被擋）就只在記憶體裡跑
+
+function loadMeta(){
+  try {
+    const raw = localStorage.getItem(META_KEY);
+    if (raw) meta = Object.assign(meta, JSON.parse(raw));
+  } catch { metaOK = false; }
+  if (!meta.lv) meta.lv = {};
+  for (const m of META) if (typeof meta.lv[m.id] !== 'number') meta.lv[m.id] = 0;
+}
+function saveMeta(){
+  try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch { metaOK = false; }
+}
+const mlv = id => meta.lv[id] || 0;
+loadMeta();
+
 const UPGRADES = [
   {id:'dmg',   name:'濃墨',   desc:'每一筆的傷害提高 20%。',            max:8, apply:()=>p.dmgMul *= 1.2},
   {id:'rate',  name:'疾筆',   desc:'出筆間隔縮短 12%。',                max:8, apply:()=>p.cdMul *= 0.88},
   {id:'multi', name:'分岔',   desc:'同時多射出一道筆鋒。',              max:4, apply:()=>p.shots += 1},
   {id:'pierce',name:'透紙',   desc:'筆鋒可多穿透一個目標。',            max:3, apply:()=>p.pierce += 1},
   {id:'speed', name:'輕身',   desc:'移動速度提高 9%。',                 max:5, apply:()=>p.spd *= 1.09},
-  {id:'hp',    name:'厚印',   desc:'生命上限 +25，並回滿。',            max:5, apply:()=>{p.maxHp += 25; p.hp = p.maxHp;}},
+  {id:'hp',    name:'厚印',   desc:'生命上限 +25，回滿，印上再加一層甲。', max:5, apply:()=>{p.maxHp += 25; p.hp = p.maxHp; healFx(true);}},
   {id:'regen', name:'滋潤',   desc:'每秒回復 0.7 點生命。',             max:5, apply:()=>p.regen += 0.7},
   {id:'magnet',name:'吸墨',   desc:'拾取範圍擴大 55%。',                max:4, apply:()=>p.pick *= 1.55},
   {id:'blade', name:'迴筆',   desc:'多一支繞身旋轉的筆，持續劃傷。',    max:4, apply:()=>p.blades += 1},
@@ -327,15 +399,18 @@ const UPGRADES = [
 ];
 
 function reset(){
+  const hp0 = 100 + mlv('base_hp')*15;
   p = {
-    x:0, y:0, r:14, hp:100, maxHp:100, spd:190,
-    lv:1, xp:0, need:5, pending:0,
-    dmgMul:1, cdMul:1, shots:1, pierce:0, regen:0, pick:120,
+    x:0, y:0, r:14, hp:hp0, maxHp:hp0, spd:190*(1 + mlv('stride')*0.04),
+    lv:1, xp:0, need:5, pending:mlv('insight'),
+    rerolls: mlv('reroll'), guard: mlv('guard')*0.12, regenFx:0,
+    dmgMul:1 + mlv('edge')*0.08, cdMul:1, shots:1, pierce:0, regen:0,
+    pick:120*(1 + mlv('reach')*0.15),
     blades:0, bladeAng:0, nova:0, novaT:0,
     cd:0, iframe:0, aim:-Math.PI/2, tilt:0,
     up:Object.fromEntries(UPGRADES.map(u=>[u.id,0]))
   };
-  enemies=[]; bullets=[]; foeShots=[]; orbs=[]; motes=[]; novas=[]; big=[];
+  enemies=[]; bullets=[]; foeShots=[]; orbs=[]; motes=[]; novas=[]; big=[]; slashes=[];
   T=0; kills=0; spawnT=0.6; shake=0; shakeT=0; camX=0; camY=0; paused=false;
   bossQueue = [85, 160, 225, 278];
   nextBoss = 70; bossCount = 0;
@@ -438,6 +513,34 @@ function splat(x, y, n, col, pow){
     motes.push({x, y, vx:Math.cos(a)*s, vy:Math.sin(a)*s, r:1+Math.random()*3.4, life:0.35+Math.random()*0.5, t:0, col});
   }
 }
+// 補血：苔綠的墨往上飄；大補再加一圈綠環
+function healFx(big){
+  const n = big ? 28 : 3;
+  for (let i=0;i<n;i++){
+    const a = Math.random()*Math.PI*2;
+    const s = (0.3 + Math.random()) * (big ? 120 : 46);
+    motes.push({
+      x: p.x + (Math.random()-0.5)*22, y: p.y + (Math.random()-0.5)*22,
+      vx: Math.cos(a)*s*0.4, vy: -Math.abs(Math.sin(a)*s) - (big ? 70 : 34),
+      r: 1.4 + Math.random()*(big ? 3.2 : 1.8),
+      life: big ? 0.95 : 0.7, t:0, col: C.tai
+    });
+  }
+  if (big) novas.push({x:p.x, y:p.y, r:0, max:126, dmg:0, hit:new Set(), t:0, heal:true});
+}
+
+// 迴筆：內端固定，外端隨等級往外長
+const BLADE_IN = 44;
+const bladeLen = () => 22 + p.up.blade * 17;      // 1級39 → 4級90
+
+// 點到線段的距離，迴筆的判定用
+function segDist(px, py, ax, ay, bx, by){
+  const dx = bx-ax, dy = by-ay, l2 = dx*dx + dy*dy;
+  let t = l2 ? ((px-ax)*dx + (py-ay)*dy) / l2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.hypot(px - (ax + dx*t), py - (ay + dy*t));
+}
+
 function kick(m){ shake = Math.max(shake, m); shakeT = 0.22; }
 
 const novaCd = () => Math.max(1.8, 6 - p.nova*0.9);
@@ -473,9 +576,20 @@ function offerUpgrades(){
     UI.cards.appendChild(d);
   });
   pendingCards = pick;
+  const rr = document.getElementById('btnReroll');
+  document.getElementById('rrLeft').textContent = p.rerolls;
+  rr.style.display = p.rerolls > 0 ? '' : 'none';
+  rr.disabled = p.rerolls <= 0;
   showVeil(UI.lvl);
   state = 'levelup';
 }
+
+function reroll(){
+  if (state !== 'levelup' || p.rerolls <= 0) return;
+  p.rerolls--;
+  offerUpgrades();
+}
+document.getElementById('btnReroll').onclick = reroll;
 function choose(u){
   u.apply(); p.up[u.id]++; p.pending--;
   pendingCards = [];
@@ -494,7 +608,12 @@ function update(dt){
   p.y += mv.y * p.spd * dt;
   p.tilt += ((mv.x * 0.22) - p.tilt) * Math.min(1, dt*8);
   p.iframe = Math.max(0, p.iframe - dt);
-  if (p.regen) p.hp = Math.min(p.maxHp, p.hp + p.regen*dt);
+  if (p.regen){
+    const before = p.hp;
+    p.hp = Math.min(p.maxHp, p.hp + p.regen*dt);
+    p.regenFx -= dt;
+    if (p.hp > before && p.regenFx <= 0){ p.regenFx = 0.5; healFx(false); }
+  }
 
   // 生成
   spawnT -= dt;
@@ -571,6 +690,9 @@ function update(dt){
           hurt(e, b.dmg, b.vx, b.vy);
           b.hit.add(e);
           if (b.pierce-- <= 0){ dead = true; break; }
+          // 還有穿透次數 → 畫一道貫穿
+          slashes.push({x:e.x, y:e.y, a:Math.atan2(b.vy, b.vx), t:0});
+          splat(e.x, e.y, 6, C.zhu, 130);
         }
       }
     }
@@ -649,14 +771,17 @@ function update(dt){
     }
 
     // 迴筆命中
-    if (p.blades){
+    if (p.blades && (e.bladeCd||0) <= 0){
+      const len = bladeLen();
       for (let k=0;k<p.blades;k++){
         const a = p.bladeAng + (k/p.blades)*Math.PI*2;
-        const bx = p.x + Math.cos(a)*74, by = p.y + Math.sin(a)*74;
-        const rr = e.r + 11;
-        if ((e.x-bx)**2 + (e.y-by)**2 < rr*rr && (e.bladeCd||0) <= 0){
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const ax = p.x + ca*BLADE_IN,       ay = p.y + sa*BLADE_IN;
+        const bx = p.x + ca*(BLADE_IN+len), by = p.y + sa*(BLADE_IN+len);
+        if (segDist(e.x, e.y, ax, ay, bx, by) < e.r + 8){
           e.bladeCd = 0.4;
-          hurt(e, 13*p.dmgMul, e.x-bx, e.y-by);
+          hurt(e, 13*p.dmgMul*(1 + 0.2*(p.up.blade-1)), e.x-p.x, e.y-p.y);
+          break;
         }
       }
     }
@@ -722,6 +847,11 @@ function update(dt){
   }
   if (p.pending > 0 && state === 'play') offerUpgrades();
 
+  for (let i=slashes.length-1;i>=0;i--){
+    slashes[i].t += dt;
+    if (slashes[i].t > 0.3) slashes.splice(i,1);
+  }
+
   // 碎墨
   for (let i=motes.length-1;i>=0;i--){
     const m = motes[i];
@@ -751,10 +881,15 @@ function hurt(e, dmg, kx, ky){
 function damagePlayer(dmg){
   if (state !== 'play') return;
   p.hp -= dmg;
-  p.iframe = 0.85;
+  p.iframe = 0.85 + p.guard;
   kick(11);
   splat(p.x, p.y, 12, C.zhu, 150);
   if (p.hp <= 0){ p.hp = 0; finish(false); }
+}
+
+// 一場打完換多少筆意
+function runReward(){
+  return Math.floor(kills/12) + Math.floor(T/30) + (MODE === 'timed' && T >= GOAL ? 15 : 0);
 }
 
 function finish(won){
@@ -765,6 +900,9 @@ function finish(won){
   UI.sTime.textContent = fmt(MODE === 'timed' ? Math.min(T, GOAL) : T);
   UI.sKill.textContent = kills;
   UI.sLv.textContent = p.lv;
+  const gain = runReward();
+  meta.pts += gain; meta.runs = (meta.runs||0) + 1; saveMeta();
+  UI.sGain.textContent = '+' + gain;
   lastRun = {survived: MODE === 'timed' ? Math.min(T, GOAL) : T, kills, level: p.lv, mode: MODE};
   boardMode = MODE;
   syncTabs();
@@ -852,6 +990,49 @@ async function postScore(){
 UI.btnPost.onclick = postScore;
 UI.nameIn.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); postScore(); } });
 
+// ─────────────────────────── 修行面板 ───────────────────────────
+function renderMeta(){
+  UI.mPts.textContent = meta.pts;
+  UI.mList.innerHTML = '';
+  for (const m of META){
+    const lv = mlv(m.id), maxed = lv >= m.max, cost = m.cost(lv);
+    const afford = meta.pts >= cost;
+    const row = document.createElement('div');
+    row.className = 'mrow';
+    const dots = Array.from({length:m.max},
+      (_, i) => `<div class="dot${i < lv ? ' on' : ''}"></div>`).join('');
+    row.innerHTML = `<div>
+        <div class="mn serif">${m.name}</div>
+        <div class="md">${m.desc}</div>
+        <div class="dots">${dots}</div>
+      </div>
+      <div class="pts">${maxed ? '圓滿' : cost + ' 筆意'}</div>`;
+    const btn = document.createElement('button');
+    btn.className = 'buy serif';
+    btn.textContent = maxed ? '—' : '添';
+    btn.disabled = maxed || !afford;
+    btn.onclick = () => {
+      if (mlv(m.id) >= m.max || meta.pts < m.cost(mlv(m.id))) return;
+      meta.pts -= m.cost(mlv(m.id));
+      meta.lv[m.id] = mlv(m.id) + 1;
+      saveMeta();
+      renderMeta();
+    };
+    row.appendChild(btn);
+    UI.mList.appendChild(row);
+  }
+  if (!metaOK){
+    const w = document.createElement('p');
+    w.className = 'muted';
+    w.textContent = '這個瀏覽器存不了進度（無痕模式或封鎖了儲存），修行只在這次開著的分頁裡有效。';
+    UI.mList.appendChild(w);
+  }
+}
+const openMeta = () => { renderMeta(); showVeil(UI.meta); state = 'menu'; };
+document.getElementById('btnMeta').onclick  = openMeta;
+document.getElementById('btnMeta2').onclick = openMeta;
+document.getElementById('btnMetaBack').onclick = () => { showVeil(UI.start); state = 'menu'; };
+
 document.getElementById('btnPeek').onclick = () => {
   lastRun = null; myId = null; syncTabs();
   UI.verdict.textContent = '榜'; UI.verdict.className = 'verdict serif win';
@@ -918,9 +1099,9 @@ function draw(){
     if (n.t < 0) continue;
     const fade = Math.max(0, 1 - n.t/0.6);
     ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI*2);
-    ctx.strokeStyle = n.dmg > 0 ? C.zhu : C.ink;
-    ctx.globalAlpha = fade * (n.dmg > 0 ? 0.8 : 0.45);
-    ctx.lineWidth = (n.dmg > 0 ? 14 : 6) * fade;
+    ctx.strokeStyle = n.heal ? C.tai : n.dmg > 0 ? C.zhu : C.ink;
+    ctx.globalAlpha = fade * (n.dmg > 0 ? 0.8 : n.heal ? 0.7 : 0.45);
+    ctx.lineWidth = (n.dmg > 0 ? 14 : n.heal ? 5 : 6) * fade;
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
@@ -944,18 +1125,41 @@ function draw(){
   }
 
   // 迴筆
-  if (p.blades) for (let k=0;k<p.blades;k++){
-    const a = p.bladeAng + (k/p.blades)*Math.PI*2;
-    const bx = p.x + Math.cos(a)*74, by = p.y + Math.sin(a)*74;
-    ctx.save(); ctx.translate(bx, by); ctx.rotate(a + Math.PI/2);
+  if (p.blades){
+    const len = bladeLen();
+    const w = 4.5 + p.up.blade*1.1;              // 等級越高筆越粗
+    for (let k=0;k<p.blades;k++){
+      const a = p.bladeAng + (k/p.blades)*Math.PI*2;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const ax = p.x + ca*BLADE_IN,       ay = p.y + sa*BLADE_IN;
+      const bx = p.x + ca*(BLADE_IN+len), by = p.y + sa*(BLADE_IN+len);
+      const nx = -sa, ny = ca;                   // 垂直方向，畫出筆肚
+      const mx = p.x + ca*(BLADE_IN+len*0.45), my = p.y + sa*(BLADE_IN+len*0.45);
+      ctx.beginPath();
+      ctx.moveTo(ax + nx*w*0.55, ay + ny*w*0.55);
+      ctx.quadraticCurveTo(mx + nx*w, my + ny*w, bx, by);   // 外端收成尖鋒
+      ctx.quadraticCurveTo(mx - nx*w, my - ny*w, ax - nx*w*0.55, ay - ny*w*0.55);
+      ctx.closePath();
+      ctx.fillStyle = C.ink; ctx.globalAlpha = .82; ctx.fill(); ctx.globalAlpha = 1;
+    }
+  }
+
+  // 透紙：貫穿的裂口
+  ctx.lineCap = 'round';
+  for (const sl of slashes){
+    const k = Math.max(0, 1 - sl.t/0.3);
+    const spread = 9 + (1-k)*30;
+    ctx.save();
+    ctx.translate(sl.x, sl.y); ctx.rotate(sl.a);
+    ctx.strokeStyle = C.zhu; ctx.globalAlpha = k*0.95; ctx.lineWidth = 3.2*k + 0.8;
     ctx.beginPath();
-    ctx.moveTo(0, -13); ctx.quadraticCurveTo(6, 0, 0, 13); ctx.quadraticCurveTo(-6, 0, 0, -13);
-    ctx.fillStyle = C.ink; ctx.globalAlpha = .8; ctx.fill(); ctx.globalAlpha = 1;
-    ctx.restore();
+    ctx.moveTo(-7, -spread); ctx.lineTo(11, -spread*0.5);
+    ctx.moveTo(-7,  spread); ctx.lineTo(11,  spread*0.5);
+    ctx.stroke();
+    ctx.restore(); ctx.globalAlpha = 1;
   }
 
   // 筆鋒（子彈）
-  ctx.lineCap = 'round';
   for (const b of bullets){
     const tx = b.x - b.vx*0.026, ty = b.y - b.vy*0.026;
     ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(b.x, b.y);
@@ -991,6 +1195,27 @@ function draw(){
 
   ctx.save();
   ctx.translate(p.x, p.y - lift); ctx.rotate(p.tilt - 0.06); ctx.scale(sqx, sqy);
+
+  // 厚印：每級在印外包一層甲
+  const arm = p.up.hp;
+  if (arm){
+    ctx.globalAlpha = blink ? .3 : .9;
+    ctx.strokeStyle = C.dian;
+    ctx.lineWidth = 2 + arm*0.4;
+    rrect(-15-arm*1.6, -15-arm*1.6, 30+arm*3.2, 30+arm*3.2, 6); ctx.stroke();
+    if (arm >= 2){                               // 四角鉚釘
+      ctx.fillStyle = C.jin;
+      const o = 15 + arm*1.6;
+      for (const sx of [-1,1]) for (const sy of [-1,1]){
+        ctx.beginPath(); ctx.arc(sx*o, sy*o, 2.4, 0, Math.PI*2); ctx.fill();
+      }
+    }
+    if (arm >= 4){                               // 再包一圈金邊
+      ctx.strokeStyle = C.jin; ctx.lineWidth = 1.6;
+      rrect(-20-arm*1.6, -20-arm*1.6, 40+arm*3.2, 40+arm*3.2, 8); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
   ctx.globalAlpha = blink ? .35 : 1;
   ctx.fillStyle = C.zhu;
   rrect(-13, -13, 26, 26, 5); ctx.fill();
