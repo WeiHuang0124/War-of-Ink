@@ -10,7 +10,6 @@
     "binding": "ASSETS"
   },
 
-  // ↓↓↓ database_id 要換成你自己的，在 D1 資料庫的 Overview 頁面複製 ↓↓↓
   "d1_databases": [
     {
       "binding": "DB",
