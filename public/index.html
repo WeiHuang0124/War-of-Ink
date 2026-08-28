@@ -140,6 +140,19 @@
   .pts{font-size:13px;letter-spacing:.1em;color:var(--ink-soft)}
   .pts b{font-size:22px;color:var(--zhu);font-weight:900;letter-spacing:0}
   .rrbar{margin-top:14px;text-align:right}
+  .orow{
+    display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center;
+    padding:14px 2px;border-bottom:1px solid rgba(27,26,23,.12);
+  }
+  .orow .on2{font-size:17px;font-weight:900;letter-spacing:.06em}
+  .orow .od{font-size:12px;color:var(--ink-soft);line-height:1.7;margin-top:3px}
+  .sw{
+    border:2px solid var(--ink);background:none;font:inherit;font-size:13px;font-weight:700;
+    padding:8px 0;width:74px;cursor:pointer;letter-spacing:.1em;
+  }
+  .sw.yes{background:var(--zhu);border-color:var(--zhu);color:#F4EFE2}
+  .danger{border-color:var(--zhu);color:var(--zhu)}
+  .danger:hover,.danger:focus-visible{background:var(--zhu);color:var(--paper)}
   .ver{position:fixed;right:12px;bottom:10px;font-size:11px;letter-spacing:.14em;
        color:var(--ink-soft);opacity:.6;z-index:20;pointer-events:none}
   .verdict{font-size:clamp(58px,15vw,108px);margin:0;font-weight:900;letter-spacing:.15em}
@@ -167,6 +180,7 @@
     <div>
       <button class="link" id="btnMeta">修行</button>
       <button class="link" id="btnPeek">觀榜</button>
+      <button class="link" id="btnOpts">設定</button>
     </div>
   </div>
 </div>
@@ -178,6 +192,35 @@
     </div>
     <div id="cards"></div>
     <div class="rrbar"><button class="link" id="btnReroll">重抽　剩 <b id="rrLeft">0</b> 次</button></div>
+  </div>
+</div>
+
+<div class="veil" id="pause">
+  <div class="plate" style="text-align:center;max-width:420px;width:100%">
+    <h1 class="verdict serif" style="font-size:clamp(44px,11vw,74px)">擱　筆</h1>
+    <div class="modes">
+      <button class="go serif" id="btnResume">續</button>
+      <button class="go serif" id="btnPauseOpts">設定</button>
+      <button class="go serif danger" id="btnGiveUp">放棄</button>
+    </div>
+    <p class="muted" id="giveUpHint">放棄會直接結束這一場，但筆意照算，也能上榜。</p>
+  </div>
+</div>
+
+<div class="veil" id="opts">
+  <div class="plate" style="width:100%;max-width:520px">
+    <div class="lvl-head"><h2 class="serif">設　定</h2><small>隨時可改</small></div>
+    <div class="orow">
+      <div><div class="on2 serif">敵人血條</div>
+        <div class="od">受傷的墨頭上顯示一條細血條。</div></div>
+      <button class="sw serif" id="swBar">開</button>
+    </div>
+    <div class="orow">
+      <div><div class="on2 serif">傷害數字</div>
+        <div class="od">打中時跳出傷害值，同一隻的連續傷害會累加成一個數字。</div></div>
+      <button class="sw serif" id="swNum">開</button>
+    </div>
+    <button class="go serif" id="btnOptsBack">回　去</button>
   </div>
 </div>
 
@@ -226,7 +269,7 @@
 (() => {
 "use strict";
 
-const VER = "v0.6.1";
+const VER = "v0.7";
 document.getElementById("verTag").textContent = VER;
 
 // ─────────────────────────── 畫布 ───────────────────────────
@@ -246,7 +289,8 @@ resize();
 
 const C = {
   paper:'#EAE3D2', paperDeep:'#DCD3BC', ink:'#1B1A17',
-  zhu:'#BF3B2D', dian:'#33526E', jin:'#B08A3E', tai:'#5C7A4A'
+  zhu:'#BF3B2D', dian:'#33526E', jin:'#B08A3E', tai:'#5C7A4A',
+  huo:'#C4622B', shuang:'#7EA2C4'
 };
 
 // 紙紋（畫一次，之後平鋪）
@@ -284,7 +328,7 @@ window.addEventListener('keydown', e => {
   }
   if (state === 'menu' && (k === 'enter' || k === ' ')) begin();
   if ((state === 'over' || state === 'win') && (k === 'enter' || k === 'r')) begin();
-  if (state === 'play' && (k === 'escape' || k === 'p')) paused = !paused;
+  if ((k === 'escape' || k === 'p') && (state === 'play' || paused)) togglePause();
 });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
@@ -336,6 +380,8 @@ const UI = {
   sLv:   document.getElementById('sLv'),
   sGain: document.getElementById('sGain'),
   meta:  document.getElementById('meta'),
+  pause: document.getElementById('pause'),
+  opts:  document.getElementById('opts'),
   mPts:  document.getElementById('mPts'),
   mList: document.getElementById('mList'),
   nameBox: document.getElementById('nameBox'),
@@ -346,12 +392,12 @@ const UI = {
   boardMsg:document.getElementById('boardMsg'),
   boardTitle: document.getElementById('boardTitle')
 };
-const VEILS = ['start','lvl','end','meta'];
+const VEILS = ['start','lvl','end','meta','pause','opts'];
 const showVeil = el => { for (const k of VEILS) UI[k].classList.toggle('on', UI[k] === el); };
 const hideVeils = () => { for (const k of VEILS) UI[k].classList.remove('on'); };
 
 let state = 'menu', paused = false;
-let p, enemies, bullets, foeShots, orbs, motes, novas, big, slashes;
+let p, enemies, bullets, foeShots, orbs, motes, novas, big, slashes, nums, bolts;
 let T, kills, spawnT, shake, shakeT, bossQueue, camX, camY;
 let pendingCards = [];
 let banner = null;
@@ -360,6 +406,14 @@ let nextBoss = 0, bossCount = 0;
 const GOAL = 300; // 五分鐘
 
 // ─────────────────────────── 場外修行 ───────────────────────────
+const OPTS_KEY = 'war-of-ink.opts.v1';
+let opts = {hpbar:true, dmgnum:true};
+function loadOpts(){
+  try { const r = localStorage.getItem(OPTS_KEY); if (r) opts = Object.assign(opts, JSON.parse(r)); } catch {}
+}
+function saveOpts(){ try { localStorage.setItem(OPTS_KEY, JSON.stringify(opts)); } catch {} }
+loadOpts();
+
 const META_KEY = 'war-of-ink.meta.v1';
 const META = [
   {id:'base_hp', name:'底墨', desc:'每級起始生命 +15',        max:5, cost:l=>3+l*2},
@@ -397,6 +451,9 @@ const UPGRADES = [
   {id:'regen', name:'滋潤',   desc:'每秒回復 0.7 點生命。',             max:5, apply:()=>p.regen += 0.7},
   {id:'magnet',name:'吸墨',   desc:'拾取範圍擴大 55%。',                max:4, apply:()=>p.pick *= 1.55},
   {id:'blade', name:'迴筆',   desc:'多一支繞身旋轉的筆，持續劃傷。',    max:4, apply:()=>p.blades += 1},
+  {id:'bolt',  name:'驚電',   desc:'不時劈中場上的墨，等級越高一次劈越多。', max:4, apply:()=>{p.bolt += 1; p.boltT = 0.6;}},
+  {id:'burn',  name:'焦墨',   desc:'筆鋒帶灼，中筆的墨會持續焦化。',        max:4, apply:()=>p.burn += 1},
+  {id:'frost', name:'凍硯',   desc:'身周結霜，靠近的墨變慢並持續受損。',    max:4, apply:()=>p.frost += 1},
   {id:'nova',  name:'潑墨',   desc:'定時向四周炸開一圈朱墨。',          max:4, apply:()=>{p.nova += 1; p.novaT = 0.5;}}
 ];
 
@@ -409,10 +466,12 @@ function reset(){
     dmgMul:1 + mlv('edge')*0.08, cdMul:1, shots:1, pierce:0, regen:0,
     pick:120*(1 + mlv('reach')*0.15),
     blades:0, bladeAng:0, nova:0, novaT:0,
+    bolt:0, boltT:0, burn:0, frost:0, frostT:0,
     cd:0, iframe:0, aim:-Math.PI/2, tilt:0,
     up:Object.fromEntries(UPGRADES.map(u=>[u.id,0]))
   };
   enemies=[]; bullets=[]; foeShots=[]; orbs=[]; motes=[]; novas=[]; big=[]; slashes=[];
+  nums=[]; bolts=[];
   T=0; kills=0; spawnT=0.6; shake=0; shakeT=0; camX=0; camY=0; paused=false;
   bossQueue = [85, 160, 225, 278];
   nextBoss = 70; bossCount = 0;
@@ -543,6 +602,22 @@ function segDist(px, py, ax, ay, bx, by){
   return Math.hypot(px - (ax + dx*t), py - (ay + dy*t));
 }
 
+// 傷害數字。同一隻短時間內的傷害累加，避免洗版
+const NUM_CAP = 70;
+function addNum(e, amount, dot){
+  if (!opts.dmgnum) return;
+  const cur = e.numRef;
+  if (cur && cur.t < 0.4 && nums.includes(cur)){
+    cur.v += amount; cur.t = 0; cur.pop = 1;
+    cur.x = e.x; cur.y = e.y - e.r - 6;
+    return;
+  }
+  if (dot) return;                       // 持續傷害不自己開新數字，只併進既有的
+  if (nums.length >= NUM_CAP) return;
+  const n = {x:e.x, y:e.y - e.r - 6, v:amount, t:0, pop:1, big:amount >= 45};
+  nums.push(n); e.numRef = n;
+}
+
 function kick(m){ shake = Math.max(shake, m); shakeT = 0.22; }
 
 const novaCd = () => Math.max(1.8, 6 - p.nova*0.9);
@@ -670,6 +745,43 @@ function update(dt){
     }
   }
   if (p.landT > 0) p.landT -= dt;
+
+  // 驚電：定時劈中畫面內隨機幾隻
+  if (p.bolt){
+    p.boltT -= dt;
+    if (p.boltT <= 0){
+      p.boltT = Math.max(1.1, 3.2 - p.bolt*0.45);
+      const reach = Math.hypot(W, H)/2;
+      const pool = enemies.filter(e => Math.hypot(e.x-p.x, e.y-p.y) < reach);
+      for (let k=0; k<Math.min(p.bolt+1, pool.length); k++){
+        const e = pool.splice(Math.random()*pool.length|0, 1)[0];
+        hurt(e, 30*p.bolt*p.dmgMul, e.x-p.x, e.y-p.y);
+        splat(e.x, e.y, 8, C.dian, 150);
+        const pts = [], n = 5;
+        for (let i=0;i<=n;i++){
+          const t = i/n, off = i===0 || i===n ? 0 : (Math.random()-0.5)*44;
+          pts.push([p.x + (e.x-p.x)*t - (e.y-p.y)/reach*off,
+                    p.y + (e.y-p.y)*t + (e.x-p.x)/reach*off]);
+        }
+        bolts.push({pts, t:0});
+      }
+      if (p.bolt) kick(6);
+    }
+  }
+
+  // 凍硯：身周的霜圈，減速並持續磨血
+  if (p.frost){
+    p.frostT -= dt;
+    const tick = p.frostT <= 0;
+    if (tick) p.frostT = 0.5;
+    const R = 92 + p.frost*26;
+    for (const e of enemies){
+      if ((e.x-p.x)**2 + (e.y-p.y)**2 < R*R){
+        e.chill = 0.35;
+        if (tick) hurt(e, 5*p.frost*p.dmgMul, 0, 0, true);
+      }
+    }
+  }
   for (let i=novas.length-1;i>=0;i--){
     const n = novas[i];
     n.t += dt;
@@ -690,6 +802,7 @@ function update(dt){
         const rr = e.r + b.r;
         if ((e.x-b.x)**2 + (e.y-b.y)**2 < rr*rr){
           hurt(e, b.dmg, b.vx, b.vy);
+          if (p.burn){ e.burn = 3; e.burnDps = 6*p.burn*p.dmgMul; }
           b.hit.add(e);
           if (b.pierce-- <= 0){ dead = true; break; }
           // 還有穿透次數 → 畫一道貫穿
@@ -710,6 +823,21 @@ function update(dt){
       e.x = p.x + Math.cos(a)*ring; e.y = p.y + Math.sin(a)*ring;
       dx = p.x-e.x; dy = p.y-e.y; d = Math.hypot(dx,dy) || 1;
     }
+
+    if (e.burn > 0){                       // 焦墨的持續傷害
+      e.burn -= dt;
+      hurt(e, e.burnDps*dt, 0, 0, true);
+      if (Math.random() < dt*7)
+        motes.push({x:e.x+(Math.random()-0.5)*e.r*1.4, y:e.y+(Math.random()-0.5)*e.r*1.4,
+                    vx:(Math.random()-0.5)*20, vy:-30-Math.random()*40,
+                    r:1+Math.random()*2, life:0.5, t:0, col:C.huo});
+    }
+    let chillMul = 1;
+    if (e.chill > 0){                      // 凍硯的減速
+      e.chill -= dt;
+      chillMul = 1 - Math.min(0.55, 0.16*p.frost);
+    }
+
     let chase = 1;
 
     if (e.bk === 'yan'){                       // 硯獸：蓄力後直線衝刺
@@ -743,8 +871,8 @@ function update(dt){
       }
     }
 
-    e.x += (dx/d)*e.spd*chase*dt + e.kx*dt;
-    e.y += (dy/d)*e.spd*chase*dt + e.ky*dt;
+    e.x += (dx/d)*e.spd*chase*chillMul*dt + e.kx*dt;
+    e.y += (dy/d)*e.spd*chase*chillMul*dt + e.ky*dt;
     e.kx *= Math.pow(0.0008, dt); e.ky *= Math.pow(0.0008, dt);
     e.flash = Math.max(0, e.flash - dt*4);
     e.wob += dt;
@@ -853,6 +981,15 @@ function update(dt){
     slashes[i].t += dt;
     if (slashes[i].t > 0.3) slashes.splice(i,1);
   }
+  for (let i=nums.length-1;i>=0;i--){
+    const n = nums[i];
+    n.t += dt; n.y -= 34*dt; n.pop = Math.max(0, n.pop - dt*5);
+    if (n.t > 0.85) nums.splice(i,1);
+  }
+  for (let i=bolts.length-1;i>=0;i--){
+    bolts[i].t += dt;
+    if (bolts[i].t > 0.3) bolts.splice(i,1);
+  }
 
   // 碎墨
   for (let i=motes.length-1;i>=0;i--){
@@ -871,8 +1008,9 @@ function update(dt){
   if (shakeT > 0){ shakeT -= dt; shake *= Math.pow(0.02, dt); } else shake = 0;
 }
 
-function hurt(e, dmg, kx, ky){
+function hurt(e, dmg, kx, ky, dot){
   e.hp -= dmg;
+  addNum(e, dmg, dot);
   e.flash = 1;
   const d = Math.hypot(kx, ky) || 1;
   const k = e.boss ? 12 : 90;
@@ -889,6 +1027,50 @@ function damagePlayer(dmg){
   if (p.hp <= 0){ p.hp = 0; finish(false); }
 }
 
+// ─────────────────────────── 暫停選單 ───────────────────────────
+let giveUpArmed = false;
+
+function togglePause(){
+  if (state !== 'play') return;
+  paused = !paused;
+  if (paused){
+    giveUpArmed = false;
+    document.getElementById('btnGiveUp').textContent = '放棄';
+    document.getElementById('giveUpHint').textContent = '放棄會直接結束這一場，但筆意照算，也能上榜。';
+    showVeil(UI.pause);
+  } else {
+    hideVeils();
+  }
+}
+document.getElementById('btnResume').onclick = () => { paused = false; hideVeils(); };
+document.getElementById('btnGiveUp').onclick = () => {
+  const b = document.getElementById('btnGiveUp');
+  if (!giveUpArmed){                       // 兩段式，避免手滑
+    giveUpArmed = true;
+    b.textContent = '真的放棄';
+    document.getElementById('giveUpHint').textContent = '再按一次就結束這一場。';
+    return;
+  }
+  paused = false;
+  finish(false);
+};
+
+// ─────────────────────────── 設定 ───────────────────────────
+let optsFrom = 'start';
+function renderOpts(){
+  const b = document.getElementById('swBar'), n = document.getElementById('swNum');
+  b.textContent = opts.hpbar ? '開' : '關';  b.classList.toggle('yes', opts.hpbar);
+  n.textContent = opts.dmgnum ? '開' : '關'; n.classList.toggle('yes', opts.dmgnum);
+}
+document.getElementById('swBar').onclick = () => { opts.hpbar = !opts.hpbar; saveOpts(); renderOpts(); };
+document.getElementById('swNum').onclick = () => { opts.dmgnum = !opts.dmgnum; saveOpts(); renderOpts(); };
+const openOpts = from => () => { optsFrom = from; renderOpts(); showVeil(UI.opts); };
+document.getElementById('btnOpts').onclick      = openOpts('start');
+document.getElementById('btnPauseOpts').onclick = openOpts('pause');
+document.getElementById('btnOptsBack').onclick  = () => {
+  showVeil(optsFrom === 'pause' ? UI.pause : UI.start);
+};
+
 // 一場打完換多少筆意
 function runReward(){
   return Math.floor(kills/12) + Math.floor(T/30) + (MODE === 'timed' && T >= GOAL ? 15 : 0);
@@ -896,6 +1078,7 @@ function runReward(){
 
 function finish(won){
   if (state !== 'play') return;
+  paused = false;
   state = won ? 'win' : 'over';
   UI.verdict.textContent = won ? '留白' : '墨盡';
   UI.verdict.className = 'verdict serif ' + (won ? 'win' : 'lose');
@@ -1091,6 +1274,22 @@ function draw(){
   for (let y=y0;y<y1;y+=g){ ctx.moveTo(x0, y); ctx.lineTo(x1, y); }
   ctx.stroke();
 
+  // 凍硯的霜圈
+  if (p.frost){
+    const R = 92 + p.frost*26;
+    ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, Math.PI*2);
+    ctx.fillStyle = C.shuang; ctx.globalAlpha = .10; ctx.fill();
+    ctx.strokeStyle = C.shuang; ctx.globalAlpha = .34; ctx.lineWidth = 1.6; ctx.stroke();
+    for (let i=0;i<6+p.frost*2;i++){            // 圈上的霜針
+      const a = (i/(6+p.frost*2))*Math.PI*2 + T*0.35;
+      ctx.beginPath();
+      ctx.moveTo(p.x + Math.cos(a)*(R-9), p.y + Math.sin(a)*(R-9));
+      ctx.lineTo(p.x + Math.cos(a)*(R+4), p.y + Math.sin(a)*(R+4));
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // 墨珠
   for (const o of orbs){
     const b = 3.2 + Math.sin(o.t*5)*0.4 + Math.min(3, o.v);
@@ -1122,6 +1321,12 @@ function draw(){
   // 敵人
   for (const e of enemies){
     inkBlob(e.x, e.y, e.r, e.lobes, e.wob, e.flash > 0 ? C.zhu : e.col, e.boss ? 0.95 : 0.88);
+    if (opts.hpbar && !e.boss && e.hp < e.maxHp){
+      const w = Math.max(18, e.r*1.9), hp = Math.max(0, e.hp/e.maxHp);
+      const by = e.y - e.r - 7;
+      ctx.fillStyle = 'rgba(27,26,23,.20)'; ctx.fillRect(e.x-w/2, by, w, 3);
+      ctx.fillStyle = e.burn > 0 ? C.huo : C.zhu; ctx.fillRect(e.x-w/2, by, w*hp, 3);
+    }
     if (e.boss){
       ctx.beginPath(); ctx.arc(e.x, e.y, e.r*1.25, 0, Math.PI*2);
       ctx.strokeStyle = C.jin; ctx.lineWidth = 2.5; ctx.globalAlpha = .8; ctx.stroke(); ctx.globalAlpha = 1;
@@ -1172,6 +1377,18 @@ function draw(){
     ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(b.x, b.y);
     ctx.strokeStyle = C.zhu; ctx.lineWidth = 5.5; ctx.globalAlpha = .92; ctx.stroke();
     ctx.beginPath(); ctx.arc(b.x, b.y, 3.4, 0, Math.PI*2); ctx.fillStyle = C.zhu; ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // 驚電
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const bl of bolts){
+    const k = Math.max(0, 1 - bl.t/0.3);
+    ctx.beginPath();
+    ctx.moveTo(bl.pts[0][0], bl.pts[0][1]);
+    for (let i=1;i<bl.pts.length;i++) ctx.lineTo(bl.pts[i][0], bl.pts[i][1]);
+    ctx.strokeStyle = C.dian; ctx.globalAlpha = k*0.28; ctx.lineWidth = 9*k; ctx.stroke();
+    ctx.globalAlpha = k*0.95; ctx.lineWidth = 2.6*k + 0.6; ctx.stroke();
     ctx.globalAlpha = 1;
   }
 
@@ -1238,6 +1455,21 @@ function draw(){
     const k = 1 - m.t/m.life;
     ctx.beginPath(); ctx.arc(m.x, m.y, m.r*k, 0, Math.PI*2);
     ctx.fillStyle = m.col; ctx.globalAlpha = k*0.8; ctx.fill(); ctx.globalAlpha = 1;
+  }
+
+  // 傷害數字
+  if (opts.dmgnum && nums.length){
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const n of nums){
+      const k = Math.max(0, 1 - n.t/0.85);
+      const sz = (n.big ? 20 : 15) + n.pop*5;
+      ctx.font = `800 ${sz}px "Noto Serif TC","Songti TC",serif`;
+      ctx.globalAlpha = k;
+      ctx.fillStyle = C.paper; ctx.fillText(Math.round(n.v), n.x+1.2, n.y+1.2);
+      ctx.fillStyle = n.big ? C.zhu : C.ink;
+      ctx.fillText(Math.round(n.v), n.x, n.y);
+    }
+    ctx.globalAlpha = 1;
   }
 
   ctx.restore();
@@ -1321,16 +1553,6 @@ function drawHUD(){
     ctx.globalAlpha = 1;
   }
 
-  if (paused){
-    ctx.fillStyle = 'rgba(234,227,210,.72)'; ctx.fillRect(0,0,W,H);
-    ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = '900 42px "Noto Serif TC","Songti TC",serif';
-    ctx.fillText('擱筆', W/2, H/2);
-    ctx.font = '600 13px system-ui,sans-serif';
-    ctx.globalAlpha = .6;
-    ctx.fillText('按 Esc 續', W/2, H/2 + 34);
-    ctx.globalAlpha = 1;
-  }
 }
 
 // ─────────────────────────── 主迴圈 ───────────────────────────
