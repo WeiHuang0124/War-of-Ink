@@ -105,6 +105,15 @@
   .row.me{background:rgba(191,59,45,.10);margin:0 -6px;padding-left:8px;padding-right:8px}
   .row .crown{color:var(--jin)}
   .muted{font-size:12px;line-height:1.8;color:var(--ink-soft);letter-spacing:.06em;margin:12px 0 0}
+  .modes{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .modes .go{margin-top:26px}
+  .tabs{display:flex;gap:0;margin-bottom:2px}
+  .tab{
+    flex:1;background:none;border:none;border-bottom:2px solid rgba(27,26,23,.18);
+    font:inherit;font-size:13px;letter-spacing:.2em;color:var(--ink-soft);
+    padding:9px 4px;cursor:pointer;
+  }
+  .tab.on{color:var(--ink);font-weight:900;border-bottom-color:var(--zhu)}
   .link{
     background:none;border:none;font:inherit;font-size:13px;color:var(--ink-soft);
     letter-spacing:.16em;cursor:pointer;text-decoration:underline;text-underline-offset:5px;
@@ -130,7 +139,10 @@
     <div class="rule"></div>
     <p class="lede serif">你是一枚硃砂印。<br>紙上的墨正在漫開，要吞掉你。</p>
     <p class="lede">撐過五分鐘。</p>
-    <button class="go serif" id="btnStart">起筆</button>
+    <div class="modes">
+      <button class="go serif" id="btnStart">五分鐘</button>
+      <button class="go serif" id="btnEndless">無　盡</button>
+    </div>
     <p class="keys">WASD／方向鍵移動 · 自動出筆 · 手機直接拖曳</p>
     <div><button class="link" id="btnPeek">觀榜</button></div>
   </div>
@@ -158,7 +170,10 @@
       <button class="go serif" id="btnPost">上榜</button>
     </div>
     <div class="board">
-      <h3 id="boardTitle">榜　單</h3>
+      <div class="tabs">
+        <button class="tab on" data-mode="timed">五分鐘</button>
+        <button class="tab" data-mode="endless">無　盡</button>
+      </div>
       <div id="rows"></div>
       <p class="muted" id="boardMsg">讀取中…</p>
     </div>
@@ -171,7 +186,7 @@
 (() => {
 "use strict";
 
-const VER = "v0.4";
+const VER = "v0.5";
 document.getElementById("verTag").textContent = VER;
 
 // ─────────────────────────── 畫布 ───────────────────────────
@@ -294,6 +309,8 @@ let p, enemies, bullets, foeShots, orbs, motes, novas, big;
 let T, kills, spawnT, shake, shakeT, bossQueue, camX, camY;
 let pendingCards = [];
 let banner = null;
+let MODE = 'timed';                       // 'timed' | 'endless'
+let nextBoss = 0, bossCount = 0;
 const GOAL = 300; // 五分鐘
 
 const UPGRADES = [
@@ -321,11 +338,14 @@ function reset(){
   enemies=[]; bullets=[]; foeShots=[]; orbs=[]; motes=[]; novas=[]; big=[];
   T=0; kills=0; spawnT=0.6; shake=0; shakeT=0; camX=0; camY=0; paused=false;
   bossQueue = [85, 160, 225, 278];
+  nextBoss = 70; bossCount = 0;
+  p.slamT = 0; p.landT = 0;
 }
 
-function begin(){ reset(); hideVeils(); state='play'; }
-document.getElementById('btnStart').onclick = begin;
-document.getElementById('btnAgain').onclick = begin;
+function begin(mode){ MODE = mode || MODE; reset(); hideVeils(); state='play'; }
+document.getElementById('btnStart').onclick   = () => begin('timed');
+document.getElementById('btnEndless').onclick = () => begin('endless');
+document.getElementById('btnAgain').onclick   = () => begin();
 
 // ─────────────────────────── 敵人 ───────────────────────────
 const TYPES = {
@@ -333,7 +353,18 @@ const TYPES = {
   spray: {hp:13, spd:152, r:9,  dmg:6,  xp:1, col:C.dian, lobes:4},
   slab:  {hp:95, spd:56,  r:22, dmg:17, xp:4, col:C.ink,  lobes:7},
   nib:   {hp:34, spd:66,  r:14, dmg:10, xp:3, col:C.dian, lobes:5, shoot:2.2},
-  boss:  {hp:1150, spd:64, r:44, dmg:26, xp:45, col:C.ink, lobes:9, shoot:1.5, boss:true}
+  // ── 四種墨王 ──
+  boss_ju:  {hp:1150, spd:64,  r:44, dmg:26, xp:45, col:C.ink,  lobes:9,  shoot:1.5, boss:'ju'},
+  boss_fei: {hp:760,  spd:106, r:33, dmg:22, xp:38, col:C.dian, lobes:7,             boss:'fei'},
+  boss_ku:  {hp:1650, spd:38,  r:50, dmg:28, xp:55, col:C.ink,  lobes:11,            boss:'ku'},
+  boss_yan: {hp:1400, spd:54,  r:40, dmg:34, xp:50, col:C.ink,  lobes:8,             boss:'yan'}
+};
+const BOSS_KINDS = ['ju', 'fei', 'ku', 'yan'];
+const BOSS_NAME = {
+  ju:  '巨墨　來了',
+  fei: '飛白　散開',
+  ku:  '枯筆　催生',
+  yan: '硯獸　衝來'
 };
 
 function makeLobes(n){
@@ -358,7 +389,8 @@ function spawnEnemy(kind){
     dmg: t.dmg, xp: t.xp, col: t.col, boss: !!t.boss,
     lobes: makeLobes(t.lobes), flash:0, wob: Math.random()*10,
     shootT: t.shoot ? Math.random()*t.shoot : 0, shoot: t.shoot||0,
-    kx:0, ky:0
+    kx:0, ky:0, bk: t.boss || null,
+    chT: 1.6, phase: 'wind', dvx: 0, dvy: 0, sumT: 2.0
   };
   if (e.boss){ e.hp = e.maxHp = t.hp*(1+T*0.010); big.push(e); }
   enemies.push(e);
@@ -408,6 +440,20 @@ function splat(x, y, n, col, pow){
 }
 function kick(m){ shake = Math.max(shake, m); shakeT = 0.22; }
 
+const novaCd = () => Math.max(1.8, 6 - p.nova*0.9);
+
+// 印章落地：震一下、炸一圈朱墨
+function slam(){
+  novas.push({x:p.x, y:p.y, r:0, max:150 + p.nova*45,
+              dmg:22*p.nova*p.dmgMul, hit:new Set(), t:0});
+  novas.push({x:p.x, y:p.y, r:0, max:(150 + p.nova*45)*0.62,
+              dmg:0, hit:new Set(), t:-0.08});          // 內圈純特效
+  p.landT = 0.3;
+  kick(26);
+  splat(p.x, p.y, 34, C.zhu, 320);
+  splat(p.x, p.y, 16, C.ink, 200);
+}
+
 // ─────────────────────────── 升級 ───────────────────────────
 function offerUpgrades(){
   const pool = UPGRADES.filter(u => p.up[u.id] < u.max);
@@ -440,7 +486,7 @@ function choose(u){
 // ─────────────────────────── 更新 ───────────────────────────
 function update(dt){
   T += dt;
-  if (T >= GOAL) return finish(true);
+  if (MODE === 'timed' && T >= GOAL) return finish(true);
 
   // 移動
   const mv = moveAxis();
@@ -457,9 +503,17 @@ function update(dt){
     const n = 1 + Math.floor(T/95);
     for (let i=0;i<n;i++) spawnEnemy(pickKind());
   }
-  if (bossQueue.length && T >= bossQueue[0]){
-    bossQueue.shift();
-    spawnEnemy('boss'); kick(16); banner = {text:'巨墨　來了', t:0};
+  let due = 0;
+  if (MODE === 'timed'){
+    if (bossQueue.length && T >= bossQueue[0]){ bossQueue.shift(); due = 1; }
+  } else if (T >= nextBoss){
+    nextBoss = T + Math.max(38, 78 - bossCount*5);
+    due = 1 + Math.floor(bossCount / 6);        // 越後面一次來越多隻
+  }
+  for (let i=0;i<due;i++){
+    const bk = BOSS_KINDS[bossCount++ % BOSS_KINDS.length];
+    spawnEnemy('boss_' + bk);
+    if (i === 0){ kick(18); banner = {text: BOSS_NAME[bk], t:0}; }
   }
 
   // 自動出筆
@@ -471,7 +525,7 @@ function update(dt){
   }
   if (target) p.aim = Math.atan2(target.y-p.y, target.x-p.x);
   if (p.cd <= 0 && target){
-    p.cd = 0.45 * p.cdMul;
+    p.cd = 0.72 * p.cdMul;
     const spread = 0.17 * (p.shots-1);
     for (let i=0;i<p.shots;i++){
       const a = p.aim - spread/2 + (p.shots>1 ? spread*i/(p.shots-1) : 0);
@@ -486,17 +540,20 @@ function update(dt){
 
   // 潑墨
   if (p.nova){
-    p.novaT -= dt;
-    if (p.novaT <= 0){
-      p.novaT = Math.max(1.8, 6 - p.nova*0.9);
-      novas.push({x:p.x, y:p.y, r:0, max:150 + p.nova*45, dmg:22*p.nova*p.dmgMul, hit:new Set(), t:0});
-      kick(5);
+    if (p.slamT > 0){
+      p.slamT -= dt;
+      if (p.slamT <= 0) slam();          // 落地
+    } else {
+      p.novaT -= dt;
+      if (p.novaT <= 0){ p.novaT = novaCd(); p.slamT = 0.34; }   // 躍起蓄力
     }
   }
+  if (p.landT > 0) p.landT -= dt;
   for (let i=novas.length-1;i>=0;i--){
     const n = novas[i];
-    n.t += dt; n.r = n.max * Math.min(1, n.t/0.45);
-    if (n.t > 0.55) novas.splice(i,1);
+    n.t += dt;
+    n.r = n.max * Math.min(1, Math.max(0, n.t)/0.45);
+    if (n.t > 0.6) novas.splice(i,1);
   }
 
   buildGrid();
@@ -529,8 +586,41 @@ function update(dt){
       e.x = p.x + Math.cos(a)*ring; e.y = p.y + Math.sin(a)*ring;
       dx = p.x-e.x; dy = p.y-e.y; d = Math.hypot(dx,dy) || 1;
     }
-    e.x += (dx/d)*e.spd*dt + e.kx*dt;
-    e.y += (dy/d)*e.spd*dt + e.ky*dt;
+    let chase = 1;
+
+    if (e.bk === 'yan'){                       // 硯獸：蓄力後直線衝刺
+      e.chT -= dt;
+      if (e.phase === 'dash'){
+        chase = 0;
+        e.x += e.dvx*dt; e.y += e.dvy*dt;
+        if (e.chT <= 0){ e.phase = 'wind'; e.chT = 1.7; }
+      } else {
+        chase = 0.3;
+        if (e.chT <= 0){
+          e.phase = 'dash'; e.chT = 0.8;
+          const a = Math.atan2(dy, dx);
+          e.dvx = Math.cos(a)*450; e.dvy = Math.sin(a)*450;
+          splat(e.x, e.y, 12, e.col, 150);
+        }
+      }
+    }
+
+    if (e.bk === 'ku'){                        // 枯筆：不停催生小墨點
+      e.sumT -= dt;
+      if (e.sumT <= 0 && enemies.length < 200){
+        e.sumT = 2.6;
+        for (let k=0;k<3;k++){
+          const m = spawnEnemy('blot');
+          const a = Math.random()*Math.PI*2;
+          m.x = e.x + Math.cos(a)*e.r*1.4;
+          m.y = e.y + Math.sin(a)*e.r*1.4;
+        }
+        splat(e.x, e.y, 14, e.col, 120);
+      }
+    }
+
+    e.x += (dx/d)*e.spd*chase*dt + e.kx*dt;
+    e.y += (dy/d)*e.spd*chase*dt + e.ky*dt;
     e.kx *= Math.pow(0.0008, dt); e.ky *= Math.pow(0.0008, dt);
     e.flash = Math.max(0, e.flash - dt*4);
     e.wob += dt;
@@ -574,7 +664,7 @@ function update(dt){
 
     // 潑墨命中
     for (const n of novas){
-      if (n.hit.has(e)) continue;
+      if (n.dmg <= 0 || n.hit.has(e)) continue;
       const rr = n.r + e.r;
       if ((e.x-n.x)**2 + (e.y-n.y)**2 < rr*rr){ n.hit.add(e); hurt(e, n.dmg, e.x-n.x, e.y-n.y); }
     }
@@ -591,6 +681,13 @@ function update(dt){
       for (let k=0;k<(e.boss?12:1);k++)
         orbs.push({x:e.x+(Math.random()-0.5)*e.r, y:e.y+(Math.random()-0.5)*e.r,
                    v:e.boss?4:e.xp, vx:0, vy:0, t:Math.random()*6});
+      if (e.bk === 'fei'){
+        for (let k=0;k<8;k++){
+          const m = spawnEnemy('spray');
+          const a = (k/8)*Math.PI*2;
+          m.x = e.x + Math.cos(a)*34; m.y = e.y + Math.sin(a)*34;
+        }
+      }
       if (e.boss){ kick(22); const bi = big.indexOf(e); if (bi>=0) big.splice(bi,1); }
       enemies.splice(i,1);
     }
@@ -665,10 +762,12 @@ function finish(won){
   state = won ? 'win' : 'over';
   UI.verdict.textContent = won ? '留白' : '墨盡';
   UI.verdict.className = 'verdict serif ' + (won ? 'win' : 'lose');
-  UI.sTime.textContent = fmt(Math.min(T, GOAL));
+  UI.sTime.textContent = fmt(MODE === 'timed' ? Math.min(T, GOAL) : T);
   UI.sKill.textContent = kills;
   UI.sLv.textContent = p.lv;
-  lastRun = {survived: Math.min(T, GOAL), kills, level: p.lv};
+  lastRun = {survived: MODE === 'timed' ? Math.min(T, GOAL) : T, kills, level: p.lv, mode: MODE};
+  boardMode = MODE;
+  syncTabs();
   myId = null; posting = false;
   UI.nameBox.style.display = 'flex';
   UI.btnPost.disabled = false;
@@ -682,7 +781,15 @@ const fmt = s => `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')
 
 // ─────────────────────────── 榜單 ───────────────────────────
 const API = '/api/scores';
-let lastRun = null, myId = null, posting = false;
+let lastRun = null, myId = null, posting = false, boardMode = 'timed';
+
+const tabEls = [...document.querySelectorAll('.tab')];
+function syncTabs(){
+  tabEls.forEach(t => t.classList.toggle('on', t.dataset.mode === boardMode));
+}
+tabEls.forEach(t => {
+  t.onclick = () => { boardMode = t.dataset.mode; syncTabs(); loadBoard(); };
+});
 
 const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
@@ -693,7 +800,7 @@ function renderBoard(top){
     const d = document.createElement('div');
     d.className = 'row' + (r.id === myId ? ' me' : '');
     d.innerHTML = `<div class="rk${i===0?' crown':''}">${i+1}</div>
-      <div class="nm">${esc(r.name)}${r.won ? ' <span class="crown">留白</span>' : ''}</div>
+      <div class="nm">${esc(r.name)}${r.won && boardMode === 'timed' ? ' <span class="crown">留白</span>' : ''}</div>
       <div class="tm">${fmt(r.survived)}</div>
       <div class="kl">${r.kills} 墨</div>`;
     UI.rows.appendChild(d);
@@ -704,7 +811,7 @@ function renderBoard(top){
 async function loadBoard(){
   UI.boardMsg.textContent = '讀取中…';
   try {
-    const res = await fetch(API, {cache:'no-store'});
+    const res = await fetch(`${API}?mode=${boardMode}`, {cache:'no-store'});
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || '');
     renderBoard(data.top);
@@ -730,6 +837,8 @@ async function postScore(){
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || '');
     myId = data.id;
+    boardMode = lastRun.mode;
+    syncTabs();
     UI.nameBox.style.display = 'none';
     renderBoard(data.top);
   } catch (e) {
@@ -744,7 +853,7 @@ UI.btnPost.onclick = postScore;
 UI.nameIn.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); postScore(); } });
 
 document.getElementById('btnPeek').onclick = () => {
-  lastRun = null; myId = null;
+  lastRun = null; myId = null; syncTabs();
   UI.verdict.textContent = '榜'; UI.verdict.className = 'verdict serif win';
   UI.sTime.textContent = '—'; UI.sKill.textContent = '—'; UI.sLv.textContent = '—';
   UI.nameBox.style.display = 'none';
@@ -806,11 +915,14 @@ function draw(){
 
   // 潑墨圈
   for (const n of novas){
+    if (n.t < 0) continue;
+    const fade = Math.max(0, 1 - n.t/0.6);
     ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI*2);
-    ctx.strokeStyle = C.zhu;
-    ctx.globalAlpha = Math.max(0, 1 - n.t/0.55) * 0.75;
-    ctx.lineWidth = 10 * (1 - n.t/0.6);
-    ctx.stroke(); ctx.globalAlpha = 1;
+    ctx.strokeStyle = n.dmg > 0 ? C.zhu : C.ink;
+    ctx.globalAlpha = fade * (n.dmg > 0 ? 0.8 : 0.45);
+    ctx.lineWidth = (n.dmg > 0 ? 14 : 6) * fade;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
   }
 
   // 敵彈
@@ -854,8 +966,31 @@ function draw(){
 
   // 印
   const blink = p.iframe > 0 && Math.floor(p.iframe*18) % 2 === 0;
+
+  // 蓄力躍起的高度
+  let lift = 0;
+  if (p.slamT > 0){
+    const k = 1 - p.slamT/0.34;
+    lift = k < 0.62 ? 46 * Math.sin((k/0.62)*Math.PI/2)      // 升
+                    : 46 * (1 - (k-0.62)/0.38) ** 2;          // 砸
+  }
+  // 落地壓扁回彈
+  let sqx = 1, sqy = 1;
+  if (p.landT > 0){
+    const k = p.landT/0.3;
+    sqx = 1 + 0.42*k*k; sqy = 1 - 0.34*k*k;
+  } else if (lift > 0){
+    sqx = 0.9; sqy = 1.12;
+  }
+
+  if (lift > 2){                                   // 騰空時地上的影子
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y + 4, 13*(1-lift/70), 5*(1-lift/70), 0, 0, Math.PI*2);
+    ctx.fillStyle = C.ink; ctx.globalAlpha = .18; ctx.fill(); ctx.globalAlpha = 1;
+  }
+
   ctx.save();
-  ctx.translate(p.x, p.y); ctx.rotate(p.tilt - 0.06);
+  ctx.translate(p.x, p.y - lift); ctx.rotate(p.tilt - 0.06); ctx.scale(sqx, sqy);
   ctx.globalAlpha = blink ? .35 : 1;
   ctx.fillStyle = C.zhu;
   rrect(-13, -13, 26, 26, 5); ctx.fill();
@@ -905,14 +1040,39 @@ function drawHUD(){
   ctx.fillText(`筆力 ${p.lv}　化墨 ${kills}`, pad, pad + 26);
   ctx.globalAlpha = 1;
 
+  // 潑墨讀取盤
+  if (p.nova){
+    const cx = pad + 17, cy = pad + 62, R = 15;
+    const prog = p.slamT > 0 ? 1 : 1 - Math.max(0, p.novaT)/novaCd();
+    const ready = prog >= 1;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2);
+    ctx.strokeStyle = 'rgba(27,26,23,.15)'; ctx.lineWidth = 4; ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, R, -Math.PI/2, -Math.PI/2 + Math.PI*2*prog);
+    ctx.strokeStyle = ready ? C.zhu : C.ink; ctx.lineWidth = 4; ctx.stroke();
+    if (ready){
+      ctx.beginPath(); ctx.arc(cx, cy, R + 4 + Math.sin(T*9)*2, 0, Math.PI*2);
+      ctx.strokeStyle = C.zhu; ctx.lineWidth = 1.5;
+      ctx.globalAlpha = .35; ctx.stroke(); ctx.globalAlpha = 1;
+    }
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '700 14px "Noto Serif TC","Songti TC",serif';
+    ctx.fillStyle = ready ? C.zhu : 'rgba(27,26,23,.45)';
+    ctx.fillText('潑', cx, cy + 1);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.font = '600 11px system-ui,sans-serif';
+    ctx.globalAlpha = .5;
+    ctx.fillText(ready ? '就緒' : '蓄墨中', cx + R + 8, cy - 5);
+    ctx.globalAlpha = 1;
+  }
+
   // 倒數
   ctx.font = '800 30px "Noto Serif TC","Songti TC",serif';
   ctx.textAlign = 'right'; ctx.textBaseline = 'top';
   ctx.fillStyle = C.ink;
-  ctx.fillText(fmt(Math.max(0, GOAL - T)), W - pad, pad - 2);
+  ctx.fillText(MODE === 'timed' ? fmt(Math.max(0, GOAL - T)) : fmt(T), W - pad, pad - 2);
   ctx.font = '600 11px system-ui,sans-serif';
   ctx.globalAlpha = .55;
-  ctx.fillText('剩餘', W - pad, pad + 34);
+  ctx.fillText(MODE === 'timed' ? '剩餘' : '無盡', W - pad, pad + 34);
   ctx.globalAlpha = 1;
 
   if (banner){

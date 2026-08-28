@@ -6,7 +6,8 @@
 
 const TOP_N = 20;   // 榜單抓幾筆
 const KEEP  = 500;  // 資料表最多保留幾筆
-const GOAL  = 300;  // 遊戲長度（秒），伺服器端硬上限
+const GOAL  = 300;   // 計時模式長度（秒）
+const CAP   = 21600; // 無盡模式收到六小時為止
 
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -17,22 +18,26 @@ const json = (body, status = 200) =>
     }
   });
 
-async function fetchTop(db) {
+const asMode = v => (v === 'endless' ? 'endless' : 'timed');
+
+async function fetchTop(db, mode) {
   const { results } = await db
     .prepare(
       `SELECT id, name, survived, kills, level, won
          FROM scores
+        WHERE mode = ?
         ORDER BY survived DESC, kills DESC, id ASC
         LIMIT ?`
     )
-    .bind(TOP_N)
+    .bind(mode, TOP_N)
     .all();
   return results ?? [];
 }
 
-async function handleGet(env) {
+async function handleGet(request, env) {
+  const mode = asMode(new URL(request.url).searchParams.get('mode'));
   try {
-    return json({ ok: true, top: await fetchTop(env.DB) });
+    return json({ ok: true, mode, top: await fetchTop(env.DB, mode) });
   } catch (e) {
     return json({ ok: false, error: String(e) }, 500);
   }
@@ -58,10 +63,11 @@ async function handlePost(request, env) {
     const n = Number(v);
     return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : lo;
   };
-  const survived = num(body.survived, 0, GOAL);
-  const kills = Math.round(num(body.kills, 0, 8000));
-  const level = Math.round(num(body.level, 1, 90));
-  const won = survived >= GOAL - 0.5 ? 1 : 0;
+  const mode = asMode(body.mode);
+  const survived = num(body.survived, 0, mode === 'timed' ? GOAL : CAP);
+  const kills = Math.round(num(body.kills, 0, 400000));
+  const level = Math.round(num(body.level, 1, 400));
+  const won = mode === 'timed' && survived >= GOAL - 0.5 ? 1 : 0;
 
   // 合理性：擋掉隨手亂試的假成績
   if (survived < 3) return json({ ok: false, error: '太短了，不收' }, 422);
@@ -71,29 +77,32 @@ async function handlePost(request, env) {
   try {
     const ins = await env.DB
       .prepare(
-        `INSERT INTO scores (name, survived, kills, level, won, created)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO scores (name, survived, kills, level, won, created, mode)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
-      .bind(name, survived, kills, level, won, Date.now())
+      .bind(name, survived, kills, level, won, Date.now(), mode)
       .run();
 
     // 只留前 KEEP 名，資料表不會無限長大
     await env.DB
       .prepare(
         `DELETE FROM scores
-          WHERE id NOT IN (
-            SELECT id FROM scores
-             ORDER BY survived DESC, kills DESC, id ASC
-             LIMIT ?
-          )`
+          WHERE mode = ?
+            AND id NOT IN (
+              SELECT id FROM scores
+               WHERE mode = ?
+               ORDER BY survived DESC, kills DESC, id ASC
+               LIMIT ?
+            )`
       )
-      .bind(KEEP)
+      .bind(mode, mode, KEEP)
       .run();
 
     return json({
       ok: true,
       id: ins.meta?.last_row_id ?? null,
-      top: await fetchTop(env.DB)
+      mode,
+      top: await fetchTop(env.DB, mode)
     });
   } catch (e) {
     return json({ ok: false, error: String(e) }, 500);
@@ -106,7 +115,7 @@ export default {
 
     if (url.pathname === '/api/scores') {
       if (!env.DB) return json({ ok: false, error: '資料庫尚未綁定' }, 500);
-      if (request.method === 'GET') return handleGet(env);
+      if (request.method === 'GET') return handleGet(request, env);
       if (request.method === 'POST') return handlePost(request, env);
       return json({ ok: false, error: '不支援的方法' }, 405);
     }
