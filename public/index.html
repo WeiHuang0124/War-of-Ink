@@ -172,6 +172,7 @@
   .gseal.locked{background:none;border:2px dashed rgba(27,26,23,.28);color:rgba(27,26,23,.3)}
   .gn{font-size:12px;font-weight:700;letter-spacing:.02em;line-height:1.3}
   .gr{font-size:10px;letter-spacing:.14em;margin-top:2px}
+  .gw{font-size:10px;color:var(--ink-soft);letter-spacing:.04em;margin-top:1px}
   .gsash{font-size:10px;color:var(--jin);letter-spacing:.1em;height:12px}
   .ver{position:fixed;right:12px;bottom:10px;font-size:11px;letter-spacing:.14em;
        color:var(--ink-soft);opacity:.6;z-index:20;pointer-events:none}
@@ -314,7 +315,7 @@
 (() => {
 "use strict";
 
-const VER = "v1.0";
+const VER = "v1.1";
 document.getElementById("verTag").textContent = VER;
 
 // ─────────────────────────── 畫布 ───────────────────────────
@@ -575,29 +576,36 @@ const RARITY = [
   {n:'絕', w:3,  col:'#B08A3E', back:60}
 ];
 const GENERALS = [
-  {id:'seal',   n:'硃砂印', ch:'印', r:0, body:'#BF3B2D', trim:'#33526E', base:true},
-  {id:'zhangliao', n:'張遼', ch:'遼', r:0, f:'wei'},
-  {id:'xuhuang',   n:'徐晃', ch:'晃', r:0, f:'wei'},
-  {id:'weiyan',    n:'魏延', ch:'延', r:0, f:'shu'},
-  {id:'liaohua',   n:'廖化', ch:'化', r:0, f:'shu'},
-  {id:'lingtong',  n:'凌統', ch:'統', r:0, f:'wu'},
-  {id:'machao',    n:'馬超', ch:'超', r:1, f:'shu'},
-  {id:'huangzhong',n:'黃忠', ch:'忠', r:1, f:'shu'},
-  {id:'taishici',  n:'太史慈', ch:'慈', r:1, f:'wu'},
-  {id:'ganning',   n:'甘寧', ch:'寧', r:1, f:'wu'},
-  {id:'xiahoudun', n:'夏侯惇', ch:'惇', r:1, f:'wei'},
-  {id:'diaochan',  n:'貂蟬', ch:'蟬', r:1, f:'qun'},
-  {id:'zhaoyun',   n:'趙雲', ch:'雲', r:2, f:'shu'},
-  {id:'zhangfei',  n:'張飛', ch:'飛', r:2, f:'shu'},
-  {id:'zhouyu',    n:'周瑜', ch:'瑜', r:2, f:'wu'},
-  {id:'sunce',     n:'孫策', ch:'策', r:2, f:'wu'},
-  {id:'caocao',    n:'曹操', ch:'操', r:2, f:'wei'},
-  {id:'guanyu',    n:'關羽', ch:'羽', r:3, f:'shu'},
-  {id:'zhugeliang',n:'諸葛亮', ch:'亮', r:3, f:'shu'},
-  {id:'lvbu',      n:'呂布', ch:'布', r:3, f:'qun'}
+  {id:'seal',   n:'硃砂印', ch:'印', r:0, body:'#BF3B2D', trim:'#33526E', base:true, w:'brush', fx:'none'},
+  {id:'zhangliao', n:'張遼', ch:'遼', r:0, f:'wei', w:'spear', fx:'none'},
+  {id:'xuhuang',   n:'徐晃', ch:'晃', r:0, f:'wei', w:'axe', fx:'none'},
+  {id:'weiyan',    n:'魏延', ch:'延', r:0, f:'shu', w:'dao', fx:'none'},
+  {id:'liaohua',   n:'廖化', ch:'化', r:0, f:'shu', w:'sword', fx:'none'},
+  {id:'lingtong',  n:'凌統', ch:'統', r:0, f:'wu', w:'twin', fx:'none'},
+  {id:'machao',    n:'馬超', ch:'超', r:1, f:'shu', w:'spear', fx:'glint'},
+  {id:'huangzhong',n:'黃忠', ch:'忠', r:1, f:'shu', w:'bow', fx:'glint'},
+  {id:'taishici',  n:'太史慈', ch:'慈', r:1, f:'wu', w:'twin', fx:'glint'},
+  {id:'ganning',   n:'甘寧', ch:'寧', r:1, f:'wu', w:'dao', fx:'bell'},
+  {id:'xiahoudun', n:'夏侯惇', ch:'惇', r:1, f:'wei', w:'dao', fx:'glint'},
+  {id:'diaochan',  n:'貂蟬', ch:'蟬', r:1, f:'qun', w:'ribbon', fx:'petal'},
+  {id:'zhaoyun',   n:'趙雲', ch:'雲', r:2, f:'shu', w:'spear', fx:'spark'},
+  {id:'zhangfei',  n:'張飛', ch:'飛', r:2, f:'shu', w:'serpent', fx:'spark'},
+  {id:'zhouyu',    n:'周瑜', ch:'瑜', r:2, f:'wu', w:'fan', fx:'spark'},
+  {id:'sunce',     n:'孫策', ch:'策', r:2, f:'wu', w:'dao', fx:'spark'},
+  {id:'caocao',    n:'曹操', ch:'操', r:2, f:'wei', w:'sword', fx:'spark'},
+  {id:'guanyu',    n:'關羽', ch:'羽', r:3, f:'shu', w:'glaive', fx:'ember'},
+  {id:'zhugeliang',n:'諸葛亮', ch:'亮', r:3, f:'shu', w:'fan', fx:'wind'},
+  {id:'lvbu',      n:'呂布', ch:'布', r:3, f:'qun', w:'halberd', fx:'flame'}
 ];
+// 兵器的金屬色隨稀有度走，絕階鍍金
+const WCOL = ['#57574F', '#5E6B60', '#6E7C8A', '#B08A3E'];
+const WNAME = {brush:'筆', spear:'槍', serpent:'蛇矛', glaive:'偃月刀', halberd:'方天畫戟',
+               sword:'劍', dao:'刀', twin:'雙刃', axe:'斧', bow:'弓', fan:'羽扇', ribbon:'舞帶'};
+const FXCOL = {glint:'#8C97A6', spark:'#7C8896', bell:'#B08A3E', petal:'#C46F8E',
+               ember:'#C4622B', wind:'#7EA2C4', flame:'#6B4E8C', none:null};
 for (const g of GENERALS){
   if (g.f){ g.body = FACTION[g.f].body; g.trim = FACTION[g.f].trim; }
+  g.wcol = g.base ? '#57574F' : WCOL[g.r];
 }
 const GEN = id => GENERALS.find(g => g.id === id) || GENERALS[0];
 const DRAW_COST = 30, TEN_COST = 270;
@@ -839,6 +847,47 @@ function splat(x, y, n, col, pow){
   }
 }
 // 補血：苔綠的墨往上飄；大補再加一圈綠環
+// 兵器特效，出筆時從刃尖冒出來。純視覺，不影響任何數值。
+function weaponFx(){
+  const SK = skinNow();
+  const col = FXCOL[SK.fx];
+  if (!col) return;
+  const tipX = p.x + Math.cos(p.aim)*46, tipY = p.y + Math.sin(p.aim)*46;
+  const push = (vx, vy, r, life) =>
+    motes.push({x:tipX, y:tipY, vx, vy, r, life, t:0, col});
+
+  switch (SK.fx){
+    case 'ember':                            // 關羽：火星往下飄
+      for (let i=0;i<3;i++)
+        push((Math.random()-0.5)*40, 18 + Math.random()*46, 1.2+Math.random()*2, 0.7);
+      break;
+    case 'flame':                            // 呂布：暗紫火舌
+      for (let i=0;i<4;i++)
+        push((Math.random()-0.5)*70, -20 - Math.random()*60, 1.6+Math.random()*2.6, 0.55);
+      break;
+    case 'wind':                             // 諸葛亮：扇出的風旋
+      for (let i=0;i<2;i++){
+        const a = p.aim + (Math.random()-0.5)*1.6;
+        push(Math.cos(a)*150, Math.sin(a)*150, 1.4+Math.random()*1.6, 0.5);
+      }
+      break;
+    case 'petal':                            // 貂蟬：飄落的花瓣
+      push((Math.random()-0.5)*50, 26+Math.random()*30, 1.8+Math.random()*2, 0.9);
+      break;
+    case 'bell':                             // 甘寧：鈴光
+      push((Math.random()-0.5)*60, (Math.random()-0.5)*60, 1.2+Math.random()*1.4, 0.45);
+      break;
+    case 'spark':
+      if (Math.random() < 0.55)
+        push((Math.random()-0.5)*90, (Math.random()-0.5)*90, 1+Math.random()*1.4, 0.35);
+      break;
+    case 'glint':
+      if (Math.random() < 0.3)
+        push((Math.random()-0.5)*60, (Math.random()-0.5)*60, 0.9+Math.random(), 0.3);
+      break;
+  }
+}
+
 function healFx(big){
   const n = big ? 28 : 3;
   for (let i=0;i<n;i++){
@@ -1044,6 +1093,7 @@ function update(dt){
     }
     splat(p.x + Math.cos(p.aim)*16, p.y + Math.sin(p.aim)*16, 3, C.zhu, 40);
     SFX.play('shoot');
+    weaponFx();
   }
 
   // 迴筆
@@ -1645,6 +1695,7 @@ function renderCodex(){
     b.innerHTML = `<div class="gseal${have ? '' : ' locked'}" ${have ? `style="background:${g.body}"` : ''}>${have ? g.ch : '？'}</div>
       <div class="gn serif">${have ? g.n : '未得'}</div>
       <div class="gr" style="color:${RARITY[g.r].col}">${g.base ? '初' : RARITY[g.r].n}</div>
+      <div class="gw">${have ? WNAME[g.w] : '　'}</div>
       <div class="gsash">${sash ? '綬 '.repeat(1) + sash : ''}</div>`;
     b.onclick = () => { if (!have) return; meta.skin = g.id; saveMeta(); renderCodex(); };
     UI.cGrid.appendChild(b);
@@ -1950,6 +2001,18 @@ function draw(){
   ctx.globalAlpha = 1;
   ctx.restore();
 
+  // 本命兵器：跟著出筆方向轉
+  if (WEAPON[SK.w]){
+    ctx.save();
+    ctx.translate(p.x, p.y - lift);
+    ctx.rotate(p.aim);
+    ctx.translate(19, Math.sin(T*3)*1.6);
+    ctx.globalAlpha = blink ? .35 : .95;
+    WEAPON[SK.w](SK.wcol, SK.trim, T);
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
   if (p.wardUp){                             // 紙甲
     ctx.beginPath(); ctx.arc(p.x, p.y, 27, 0, Math.PI*2);
     ctx.globalAlpha = .10; ctx.fillStyle = C.shuang; ctx.fill();
@@ -1982,6 +2045,143 @@ function draw(){
   ctx.restore();
   drawHUD();
 }
+
+// ─────────────────────────── 兵器 ───────────────────────────
+// 全部畫在局部座標：握把在原點，刃尖朝 +x。
+const WEAPON = {
+  brush(m, a){                                   // 筆
+    ctx.strokeStyle = m; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(8, 0); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(8, -3.4); ctx.quadraticCurveTo(20, -1.6, 26, 0);
+    ctx.quadraticCurveTo(20, 1.6, 8, 3.4); ctx.closePath();
+    ctx.fillStyle = a; ctx.fill();
+  },
+  spear(m, a){                                   // 槍
+    ctx.strokeStyle = m; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-20, 0); ctx.lineTo(14, 0); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(14, -3.6); ctx.quadraticCurveTo(24, -2, 31, 0);
+    ctx.quadraticCurveTo(24, 2, 14, 3.6); ctx.closePath();
+    ctx.fillStyle = m; ctx.fill();
+    ctx.strokeStyle = a; ctx.lineWidth = 1.4;    // 紅纓
+    for (let i=-1;i<=1;i++){
+      ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(5, i*4.5); ctx.stroke();
+    }
+  },
+  serpent(m, a){                                 // 丈八蛇矛
+    ctx.strokeStyle = m; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-20, 0); ctx.lineTo(12, 0); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(12, 0);
+    ctx.bezierCurveTo(18, -6, 24, 5, 32, -1);    // 蛇行的刃
+    ctx.strokeStyle = m; ctx.lineWidth = 3.4; ctx.stroke();
+    ctx.strokeStyle = a; ctx.lineWidth = 1.3;
+    for (let i=-1;i<=1;i+=2){
+      ctx.beginPath(); ctx.moveTo(11, 0); ctx.lineTo(4, i*4.5); ctx.stroke();
+    }
+  },
+  glaive(m, a){                                  // 青龍偃月刀
+    ctx.strokeStyle = m; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-20, 0); ctx.lineTo(9, 0); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(9, -1);
+    ctx.quadraticCurveTo(26, -16, 33, -3);
+    ctx.quadraticCurveTo(24, -2, 12, 4);
+    ctx.closePath();
+    ctx.fillStyle = m; ctx.fill();
+    ctx.strokeStyle = a; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(9, 1); ctx.lineTo(2, 5); ctx.stroke();
+  },
+  halberd(m, a){                                 // 方天畫戟
+    ctx.strokeStyle = m; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-20, 0); ctx.lineTo(12, 0); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(12, -3); ctx.quadraticCurveTo(24, -1.6, 32, 0);
+    ctx.quadraticCurveTo(24, 1.6, 12, 3); ctx.closePath();
+    ctx.fillStyle = m; ctx.fill();
+    for (const sy of [-1, 1]){                   // 兩側月牙
+      ctx.beginPath();
+      ctx.moveTo(11, sy*2);
+      ctx.quadraticCurveTo(21, sy*13, 26, sy*4);
+      ctx.quadraticCurveTo(19, sy*5, 11, sy*2);
+      ctx.fillStyle = a; ctx.fill();
+    }
+  },
+  sword(m, a){                                   // 劍
+    ctx.beginPath();
+    ctx.moveTo(-2, -2.8); ctx.lineTo(24, -1.2); ctx.lineTo(28, 0);
+    ctx.lineTo(24, 1.2); ctx.lineTo(-2, 2.8); ctx.closePath();
+    ctx.fillStyle = m; ctx.fill();
+    ctx.strokeStyle = a; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-3, -6); ctx.lineTo(-3, 6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(-3, 0); ctx.stroke();
+  },
+  dao(m, a){                                     // 刀
+    ctx.beginPath();
+    ctx.moveTo(-2, -3);
+    ctx.quadraticCurveTo(16, -6, 29, 0);
+    ctx.quadraticCurveTo(15, 1.5, -2, 3);
+    ctx.closePath();
+    ctx.fillStyle = m; ctx.fill();
+    ctx.strokeStyle = a; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-3, -5); ctx.lineTo(-3, 5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-13, 0); ctx.lineTo(-3, 0); ctx.stroke();
+  },
+  twin(m, a){                                    // 雙刃
+    for (const sy of [-1, 1]){
+      ctx.save(); ctx.translate(0, sy*7); ctx.rotate(sy*0.22);
+      ctx.beginPath();
+      ctx.moveTo(-2, -2.2); ctx.quadraticCurveTo(11, -4, 21, 0);
+      ctx.quadraticCurveTo(11, 1.2, -2, 2.2); ctx.closePath();
+      ctx.fillStyle = m; ctx.fill();
+      ctx.strokeStyle = a; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(-3, -3.5); ctx.lineTo(-3, 3.5); ctx.stroke();
+      ctx.restore();
+    }
+  },
+  axe(m, a){                                     // 斧
+    ctx.strokeStyle = m; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-18, 0); ctx.lineTo(16, 0); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(10, -3);
+    ctx.quadraticCurveTo(26, -15, 28, 0);
+    ctx.quadraticCurveTo(26, 15, 10, 3);
+    ctx.closePath();
+    ctx.fillStyle = a; ctx.fill();
+  },
+  bow(m, a){                                     // 弓
+    ctx.strokeStyle = m; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(4, -16); ctx.quadraticCurveTo(24, 0, 4, 16);
+    ctx.stroke();
+    ctx.strokeStyle = a; ctx.lineWidth = 1; ctx.globalAlpha *= .8;
+    ctx.beginPath(); ctx.moveTo(4, -16); ctx.lineTo(4, 16); ctx.stroke();
+    ctx.globalAlpha /= .8;
+  },
+  fan(m, a, t){                                  // 羽扇
+    ctx.save(); ctx.rotate(Math.sin(t*1.6)*0.12);
+    ctx.beginPath();
+    ctx.moveTo(0, 0); ctx.arc(0, 0, 24, -0.62, 0.62); ctx.closePath();
+    ctx.fillStyle = a; ctx.globalAlpha *= .55; ctx.fill(); ctx.globalAlpha /= .55;
+    ctx.strokeStyle = m; ctx.lineWidth = 1.2;
+    for (let i=-2;i<=2;i++){
+      ctx.beginPath(); ctx.moveTo(0, 0);
+      ctx.lineTo(Math.cos(i*0.3)*24, Math.sin(i*0.3)*24); ctx.stroke();
+    }
+    ctx.restore();
+  },
+  ribbon(m, a, t){                               // 舞帶
+    ctx.strokeStyle = a; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-6, 0);
+    for (let i=1;i<=10;i++){
+      const x = -6 + i*3.4;
+      ctx.lineTo(x, Math.sin(t*4 + i*0.7)*5.5*(i/10));
+    }
+    ctx.stroke();
+  }
+};
 
 function rrect(x, y, w, h, r){
   ctx.beginPath();
