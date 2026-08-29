@@ -156,6 +156,23 @@
   .sw.yes{background:var(--zhu);border-color:var(--zhu);color:#F4EFE2}
   .danger{border-color:var(--zhu);color:var(--zhu)}
   .danger:hover,.danger:focus-visible{background:var(--zhu);color:var(--paper)}
+  #codex .plate{width:100%;max-width:620px}
+  #cGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+  @media(max-width:560px){ #cGrid{grid-template-columns:repeat(4,1fr)} }
+  .gcell{
+    border:2px solid rgba(27,26,23,.18);padding:8px 4px 6px;text-align:center;
+    cursor:pointer;background:none;font:inherit;
+  }
+  .gcell:disabled{cursor:default;opacity:.5}
+  .gcell.on{border-color:var(--zhu);background:#F3EDDC}
+  .gseal{
+    width:38px;height:38px;margin:0 auto 5px;border-radius:5px;display:grid;place-items:center;
+    color:#F4EFE2;font-size:20px;font-weight:800;
+  }
+  .gseal.locked{background:none;border:2px dashed rgba(27,26,23,.28);color:rgba(27,26,23,.3)}
+  .gn{font-size:12px;font-weight:700;letter-spacing:.02em;line-height:1.3}
+  .gr{font-size:10px;letter-spacing:.14em;margin-top:2px}
+  .gsash{font-size:10px;color:var(--jin);letter-spacing:.1em;height:12px}
   .ver{position:fixed;right:12px;bottom:10px;font-size:11px;letter-spacing:.14em;
        color:var(--ink-soft);opacity:.6;z-index:20;pointer-events:none}
   .verdict{font-size:clamp(58px,15vw,108px);margin:0;font-weight:900;letter-spacing:.15em}
@@ -232,6 +249,23 @@
   </div>
 </div>
 
+<div class="veil" id="codex">
+  <div class="plate">
+    <div class="lvl-head">
+      <h2 class="serif">印　譜</h2>
+      <small class="pts">筆意 <b id="cPts">0</b>　·　<span id="cOwn">0/20</span></small>
+    </div>
+    <p class="muted" id="cResult" style="margin:0 0 4px">抽到重複的會升印綬，並退還部分筆意。造型不影響數值。</p>
+    <p class="muted" style="margin:0 0 12px">常 56%　良 27%　珍 14%　絕 3%　·　十抽必出珍以上</p>
+    <div id="cGrid"></div>
+    <div class="modes">
+      <button class="go serif" id="btnDraw1">抽一次<br><small>30</small></button>
+      <button class="go serif" id="btnDraw10">十　抽<br><small>270</small></button>
+      <button class="go serif" id="btnCodexBack">回　去</button>
+    </div>
+  </div>
+</div>
+
 <div class="veil" id="meta">
   <div class="plate">
     <div class="lvl-head">
@@ -239,7 +273,10 @@
       <small class="pts">筆意 <b id="mPts">0</b></small>
     </div>
     <div id="mList"></div>
-    <button class="go serif" id="btnMetaBack">回　去</button>
+    <div class="modes">
+      <button class="go serif" id="btnCodex">印　譜</button>
+      <button class="go serif" id="btnMetaBack">回　去</button>
+    </div>
   </div>
 </div>
 
@@ -277,7 +314,7 @@
 (() => {
 "use strict";
 
-const VER = "v0.9";
+const VER = "v1.0";
 document.getElementById("verTag").textContent = VER;
 
 // ─────────────────────────── 畫布 ───────────────────────────
@@ -491,6 +528,11 @@ const UI = {
   sLv:   document.getElementById('sLv'),
   sGain: document.getElementById('sGain'),
   meta:  document.getElementById('meta'),
+  codex: document.getElementById('codex'),
+  cPts:  document.getElementById('cPts'),
+  cOwn:  document.getElementById('cOwn'),
+  cGrid: document.getElementById('cGrid'),
+  cResult: document.getElementById('cResult'),
   pause: document.getElementById('pause'),
   opts:  document.getElementById('opts'),
   mPts:  document.getElementById('mPts'),
@@ -503,7 +545,7 @@ const UI = {
   boardMsg:document.getElementById('boardMsg'),
   boardTitle: document.getElementById('boardTitle')
 };
-const VEILS = ['start','lvl','end','meta','pause','opts'];
+const VEILS = ['start','lvl','end','meta','pause','opts','codex'];
 const showVeil = el => { for (const k of VEILS) UI[k].classList.toggle('on', UI[k] === el); };
 const hideVeils = () => { for (const k of VEILS) UI[k].classList.remove('on'); };
 
@@ -516,6 +558,75 @@ let banner = null;
 let MODE = 'timed';                       // 'timed' | 'endless'
 let nextBoss = 0, bossCount = 0;
 const GOAL = 300; // 五分鐘
+
+// ─────────────────────────── 印譜 ───────────────────────────
+// 純造型，不動任何數值。造型帶屬性的話每加一個角色都要重調平衡，
+// 而且會逼玩家為了強度去抽，反而綁死以後加角色的自由。
+const FACTION = {
+  wei:{body:'#3D5A78', trim:'#93AAC0'},
+  shu:{body:'#BF3B2D', trim:'#E2A492'},
+  wu: {body:'#4E7A5E', trim:'#9FC2AC'},
+  qun:{body:'#6B4E8C', trim:'#BC9FD3'}
+};
+const RARITY = [
+  {n:'常', w:56, col:'#6B6A63', back:8},
+  {n:'良', w:27, col:'#4E7A5E', back:14},
+  {n:'珍', w:14, col:'#33526E', back:26},
+  {n:'絕', w:3,  col:'#B08A3E', back:60}
+];
+const GENERALS = [
+  {id:'seal',   n:'硃砂印', ch:'印', r:0, body:'#BF3B2D', trim:'#33526E', base:true},
+  {id:'zhangliao', n:'張遼', ch:'遼', r:0, f:'wei'},
+  {id:'xuhuang',   n:'徐晃', ch:'晃', r:0, f:'wei'},
+  {id:'weiyan',    n:'魏延', ch:'延', r:0, f:'shu'},
+  {id:'liaohua',   n:'廖化', ch:'化', r:0, f:'shu'},
+  {id:'lingtong',  n:'凌統', ch:'統', r:0, f:'wu'},
+  {id:'machao',    n:'馬超', ch:'超', r:1, f:'shu'},
+  {id:'huangzhong',n:'黃忠', ch:'忠', r:1, f:'shu'},
+  {id:'taishici',  n:'太史慈', ch:'慈', r:1, f:'wu'},
+  {id:'ganning',   n:'甘寧', ch:'寧', r:1, f:'wu'},
+  {id:'xiahoudun', n:'夏侯惇', ch:'惇', r:1, f:'wei'},
+  {id:'diaochan',  n:'貂蟬', ch:'蟬', r:1, f:'qun'},
+  {id:'zhaoyun',   n:'趙雲', ch:'雲', r:2, f:'shu'},
+  {id:'zhangfei',  n:'張飛', ch:'飛', r:2, f:'shu'},
+  {id:'zhouyu',    n:'周瑜', ch:'瑜', r:2, f:'wu'},
+  {id:'sunce',     n:'孫策', ch:'策', r:2, f:'wu'},
+  {id:'caocao',    n:'曹操', ch:'操', r:2, f:'wei'},
+  {id:'guanyu',    n:'關羽', ch:'羽', r:3, f:'shu'},
+  {id:'zhugeliang',n:'諸葛亮', ch:'亮', r:3, f:'shu'},
+  {id:'lvbu',      n:'呂布', ch:'布', r:3, f:'qun'}
+];
+for (const g of GENERALS){
+  if (g.f){ g.body = FACTION[g.f].body; g.trim = FACTION[g.f].trim; }
+}
+const GEN = id => GENERALS.find(g => g.id === id) || GENERALS[0];
+const DRAW_COST = 30, TEN_COST = 270;
+
+// 抽一張。同一張重複則升印綬（最多 5），並退還一點筆意。
+function rollOne(floor){
+  // 先抽稀有度再從該階均勻抽一張，這樣面板上標的機率才是真的
+  const lo = floor === undefined ? 0 : floor;
+  const tiers = [];
+  for (let r = lo; r < RARITY.length; r++){
+    if (GENERALS.some(g => !g.base && g.r === r)) tiers.push(r);
+  }
+  let total = 0;
+  for (const r of tiers) total += RARITY[r].w;
+  let x = Math.random()*total, tier = tiers[tiers.length-1];
+  for (const r of tiers){ x -= RARITY[r].w; if (x <= 0){ tier = r; break; } }
+  const pool = GENERALS.filter(g => !g.base && g.r === tier);
+  const pick = pool[Math.random()*pool.length|0];
+  const had = meta.skins[pick.id] || 0;
+  if (had){
+    const lv = Math.min(5, had + 1);
+    meta.skins[pick.id] = lv;
+    const back = RARITY[pick.r].back;
+    meta.pts += back;
+    return {g:pick, dup:true, lv, back};
+  }
+  meta.skins[pick.id] = 1;
+  return {g:pick, dup:false, lv:1, back:0};
+}
 
 // 地上的祭壇，走過去就吃到，效果持續整場
 const ALTARS = [
@@ -555,7 +666,7 @@ const META = [
   {id:'guard',   name:'護心', desc:'每級受傷後無敵 +0.12 秒', max:3, cost:l=>5+l*4},
   {id:'insight', name:'先機', desc:'每級開場直接添一筆',      max:2, cost:l=>12+l*12}
 ];
-let meta = {pts:0, lv:{}, runs:0};
+let meta = {pts:0, lv:{}, runs:0, skins:{seal:1}, skin:'seal'};
 let metaOK = true;                      // localStorage 不能用時（無痕、被擋）就只在記憶體裡跑
 
 function loadMeta(){
@@ -565,11 +676,16 @@ function loadMeta(){
   } catch { metaOK = false; }
   if (!meta.lv) meta.lv = {};
   for (const m of META) if (typeof meta.lv[m.id] !== 'number') meta.lv[m.id] = 0;
+  if (!meta.skins || typeof meta.skins !== 'object') meta.skins = {};
+  meta.skins.seal = Math.max(1, meta.skins.seal || 1);
+  if (!meta.skin || !meta.skins[meta.skin]) meta.skin = 'seal';
 }
 function saveMeta(){
   try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch { metaOK = false; }
 }
 const mlv = id => meta.lv[id] || 0;
+const skinNow = () => GEN(meta.skin);
+const sashLv  = () => Math.max(0, (meta.skins[meta.skin] || 1) - 1);
 loadMeta();
 
 const UPGRADES = [
@@ -1514,6 +1630,52 @@ document.getElementById('btnMetaBack').onclick = () => {
   state = 'menu';
 };
 
+// ─────────────────────────── 印譜面板 ───────────────────────────
+function renderCodex(){
+  UI.cPts.textContent = meta.pts;
+  const own = GENERALS.filter(g => meta.skins[g.id]).length;
+  UI.cOwn.textContent = own + '/' + GENERALS.length;
+  UI.cGrid.innerHTML = '';
+  for (const g of GENERALS){
+    const have = !!meta.skins[g.id];
+    const b = document.createElement('button');
+    b.className = 'gcell' + (meta.skin === g.id ? ' on' : '');
+    b.disabled = !have;
+    const sash = have ? (meta.skins[g.id] - 1) : 0;
+    b.innerHTML = `<div class="gseal${have ? '' : ' locked'}" ${have ? `style="background:${g.body}"` : ''}>${have ? g.ch : '？'}</div>
+      <div class="gn serif">${have ? g.n : '未得'}</div>
+      <div class="gr" style="color:${RARITY[g.r].col}">${g.base ? '初' : RARITY[g.r].n}</div>
+      <div class="gsash">${sash ? '綬 '.repeat(1) + sash : ''}</div>`;
+    b.onclick = () => { if (!have) return; meta.skin = g.id; saveMeta(); renderCodex(); };
+    UI.cGrid.appendChild(b);
+  }
+}
+
+function doDraw(n){
+  const cost = n === 10 ? TEN_COST : DRAW_COST;
+  if (meta.pts < cost){ UI.cResult.textContent = '筆意不夠。再打幾場。'; return; }
+  meta.pts -= cost;
+  const got = [];
+  for (let i=0;i<n;i++){
+    // 十抽保底：最後一張至少是珍
+    got.push(rollOne(n === 10 && i === n-1 && !got.some(r => r.g.r >= 2) ? 2 : undefined));
+  }
+  saveMeta();
+  const New = got.filter(r => !r.dup);
+  const back = got.reduce((a, r) => a + r.back, 0);
+  const parts = [];
+  if (New.length) parts.push('新得 ' + New.map(r => `${r.g.n}（${RARITY[r.g.r].n}）`).join('、'));
+  const dups = got.filter(r => r.dup);
+  if (dups.length) parts.push(`重複 ${dups.length} 張，升綬並退還 ${back} 筆意`);
+  UI.cResult.textContent = parts.join('　·　') || '什麼都沒抽到？';
+  if (New.some(r => r.g.r >= 2)) SFX.play('altar'); else SFX.play('gem');
+  renderCodex();
+}
+document.getElementById('btnDraw1').onclick  = () => doDraw(1);
+document.getElementById('btnDraw10').onclick = () => doDraw(10);
+document.getElementById('btnCodex').onclick  = () => { renderCodex(); showVeil(UI.codex); };
+document.getElementById('btnCodexBack').onclick = () => { renderMeta(); showVeil(UI.meta); };
+
 document.getElementById('btnPeek').onclick = () => {
   lastRun = null; myId = null; syncTabs();
   UI.verdict.textContent = '榜'; UI.verdict.className = 'verdict serif win';
@@ -1544,6 +1706,7 @@ function inkBlob(x, y, r, lobes, wob, col, alpha){
 }
 
 function draw(){
+  const SK = skinNow();
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = paperPat;
   ctx.fillRect(0, 0, W, H);
@@ -1602,7 +1765,7 @@ function draw(){
     if (n.t < 0) continue;
     const fade = Math.max(0, 1 - n.t/0.6);
     ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI*2);
-    ctx.strokeStyle = n.heal ? C.tai : n.dmg > 0 ? C.zhu : C.ink;
+    ctx.strokeStyle = n.heal ? C.tai : n.dmg > 0 ? SK.body : C.ink;
     ctx.globalAlpha = fade * (n.dmg > 0 ? 0.8 : n.heal ? 0.7 : 0.45);
     ctx.lineWidth = (n.dmg > 0 ? 14 : n.heal ? 5 : 6) * fade;
     ctx.stroke();
@@ -1672,8 +1835,8 @@ function draw(){
   for (const b of bullets){
     const tx = b.x - b.vx*0.026, ty = b.y - b.vy*0.026;
     ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(b.x, b.y);
-    ctx.strokeStyle = C.zhu; ctx.lineWidth = 5.5; ctx.globalAlpha = .92; ctx.stroke();
-    ctx.beginPath(); ctx.arc(b.x, b.y, 3.4, 0, Math.PI*2); ctx.fillStyle = C.zhu; ctx.fill();
+    ctx.strokeStyle = SK.body; ctx.lineWidth = 5.5; ctx.globalAlpha = .92; ctx.stroke();
+    ctx.beginPath(); ctx.arc(b.x, b.y, 3.4, 0, Math.PI*2); ctx.fillStyle = SK.body; ctx.fill();
     ctx.globalAlpha = 1;
   }
 
@@ -1753,7 +1916,7 @@ function draw(){
   const arm = p.up.hp;
   if (arm){
     ctx.globalAlpha = blink ? .3 : .9;
-    ctx.strokeStyle = C.dian;
+    ctx.strokeStyle = SK.trim;
     ctx.lineWidth = 2 + arm*0.4;
     rrect(-15-arm*1.6, -15-arm*1.6, 30+arm*3.2, 30+arm*3.2, 6); ctx.stroke();
     if (arm >= 2){                               // 四角鉚釘
@@ -1770,12 +1933,20 @@ function draw(){
     ctx.globalAlpha = 1;
   }
   ctx.globalAlpha = blink ? .35 : 1;
-  ctx.fillStyle = C.zhu;
+  ctx.fillStyle = SK.body;
   rrect(-13, -13, 26, 26, 5); ctx.fill();
-  ctx.fillStyle = 'rgba(244,239,226,.92)';
+  const sash = sashLv();                       // 印綬：重複抽到會加圈
+  if (sash){
+    ctx.strokeStyle = C.jin; ctx.lineWidth = 1.2;
+    for (let i=0;i<sash;i++){
+      const o = 13 + 2.6 + i*2.6;
+      rrect(-o, -o, o*2, o*2, 5 + i); ctx.stroke();
+    }
+  }
+  ctx.fillStyle = 'rgba(244,239,226,.94)';
   ctx.font = '700 15px "Noto Serif TC","Songti TC",serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('印', 0, 1);
+  ctx.fillText(SK.ch, 0, 1);
   ctx.globalAlpha = 1;
   ctx.restore();
 
