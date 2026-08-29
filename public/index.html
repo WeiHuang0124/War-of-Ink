@@ -223,6 +223,11 @@
         <div class="od">打中時跳出傷害值，同一隻的連續傷害會累加成一個數字。</div></div>
       <button class="sw serif" id="swNum">開</button>
     </div>
+    <div class="orow">
+      <div><div class="on2 serif">音效</div>
+        <div class="od">即時合成，沒有外部音檔。第一次點畫面才會啟動。</div></div>
+      <button class="sw serif" id="swSfx">開</button>
+    </div>
     <button class="go serif" id="btnOptsBack">回　去</button>
   </div>
 </div>
@@ -272,7 +277,7 @@
 (() => {
 "use strict";
 
-const VER = "v0.8";
+const VER = "v0.9";
 document.getElementById("verTag").textContent = VER;
 
 // ─────────────────────────── 畫布 ───────────────────────────
@@ -318,9 +323,112 @@ const paperPat = (() => {
   return ctx.createPattern(o, 'repeat');
 })();
 
+// ─────────────────────────── 音效 ───────────────────────────
+// 全部即時合成。瀏覽器規定要有使用者動作才能出聲，所以第一次點擊／按鍵才初始化。
+const SFX = (() => {
+  let ac = null, bus = null, noise = null;
+  const active = [];                   // 近期發聲的時間戳，自我修剪
+  const last = Object.create(null);
+
+  function ensure(){
+    if (ac) { if (ac.state === 'suspended') ac.resume(); return true; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    try { ac = new AC(); } catch { return false; }
+    bus = ac.createGain(); bus.gain.value = 0.55; bus.connect(ac.destination);
+    // 一段白噪音，拿來做筆觸、潑墨、雷聲
+    const n = ac.sampleRate * 0.7;
+    noise = ac.createBuffer(1, n, ac.sampleRate);
+    const d = noise.getChannelData(0);
+    for (let i=0;i<n;i++) d[i] = Math.random()*2 - 1;
+    return true;
+  }
+
+  function slot(){
+    const now = performance.now();
+    while (active.length && now - active[0] > 400) active.shift();
+    if (active.length > 22) return false;   // 同時發聲數上限，避免爆音
+    active.push(now);
+    return true;
+  }
+
+  // 純音：可滑音
+  function tone(f0, f1, dur, type, vol, delay){
+    const t = ac.currentTime + (delay||0);
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(f0, t);
+    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(20,f1), t+dur);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + Math.min(0.012, dur*0.3));
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    o.connect(g); g.connect(bus);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+
+  // 噪音：走濾波器，做出紙、墨、雷的質感
+  function hiss(dur, vol, type, f0, f1, q, delay){
+    const t = ac.currentTime + (delay||0);
+    const src = ac.createBufferSource(); src.buffer = noise;
+    const flt = ac.createBiquadFilter(); flt.type = type; flt.Q.value = q || 1;
+    flt.frequency.setValueAtTime(f0, t);
+    if (f1 && f1 !== f0) flt.frequency.exponentialRampToValueAtTime(Math.max(40,f1), t+dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    src.connect(flt); flt.connect(g); g.connect(bus);
+    src.start(t); src.stop(t + dur + 0.02);
+  }
+
+  const BANK = {
+    shoot: () => hiss(0.07, 0.05, 'highpass', 1600, 2600, 1),
+    hit:   () => hiss(0.04, 0.05, 'bandpass', 2200, 1400, 3),
+    kill:  () => { hiss(0.16, 0.10, 'lowpass', 1100, 260, 1); tone(180, 90, 0.12, 'sine', 0.05); },
+    gem:   () => tone(720, 980, 0.07, 'triangle', 0.045),
+    level: () => { tone(523, 523, 0.14, 'triangle', 0.10);
+                   tone(784, 784, 0.22, 'triangle', 0.09, 0.09); },
+    hurt:  () => { tone(160, 70, 0.24, 'sine', 0.18); hiss(0.12, 0.10, 'lowpass', 900, 200, 1); },
+    slam:  () => { tone(90, 34, 0.42, 'sine', 0.32); hiss(0.30, 0.20, 'lowpass', 2200, 300, 1);
+                   tone(220, 80, 0.18, 'triangle', 0.10); },
+    bolt:  () => { hiss(0.10, 0.13, 'highpass', 3200, 1200, 2); tone(1200, 380, 0.07, 'square', 0.03); },
+    beam:  () => { hiss(0.34, 0.14, 'bandpass', 500, 1900, 1.5); tone(150, 320, 0.28, 'sawtooth', 0.05); },
+    ward:  () => tone(880, 1320, 0.16, 'triangle', 0.09),
+    wardgo:() => { tone(1200, 300, 0.20, 'triangle', 0.13); hiss(0.14, 0.09, 'highpass', 2600, 900, 1); },
+    boss:  () => { tone(88, 74, 1.30, 'sine', 0.30); tone(132, 110, 1.10, 'triangle', 0.14);
+                   hiss(0.60, 0.12, 'lowpass', 700, 120, 1); },
+    altar: () => { tone(1046, 1046, 0.34, 'triangle', 0.11);
+                   tone(1568, 1568, 0.46, 'sine', 0.07, 0.06); },
+    over:  () => { tone(330, 110, 0.85, 'triangle', 0.20); hiss(0.5, 0.10, 'lowpass', 800, 150, 1); },
+    win:   () => { tone(523,523,0.18,'triangle',0.13); tone(659,659,0.18,'triangle',0.13,0.13);
+                   tone(784,784,0.18,'triangle',0.13,0.26); tone(1046,1046,0.5,'triangle',0.13,0.39); }
+  };
+  // 高頻音效的最短間隔，毫秒
+  const GAP = {shoot:70, hit:55, kill:45, gem:55, bolt:60};
+
+  return {
+    unlock: ensure,
+    play(name){
+      if (!opts.sfx || !ac && !ensure()) return;
+      if (!ac) return;
+      const gap = GAP[name];
+      if (gap){
+        const now = performance.now();
+        if (last[name] && now - last[name] < gap) return;
+        last[name] = now;
+      }
+      if (!slot()) return;
+      try { BANK[name] && BANK[name](); } catch {}
+    }
+  };
+})();
+
 // ─────────────────────────── 輸入 ───────────────────────────
 const keys = Object.create(null);
+window.addEventListener('pointerdown', () => SFX.unlock(), {passive:true});
+window.addEventListener('touchstart',  () => SFX.unlock(), {passive:true});
 window.addEventListener('keydown', e => {
+  SFX.unlock();
   const k = e.key.toLowerCase();
   keys[k] = true;
   if ([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k)) e.preventDefault();
@@ -430,7 +538,7 @@ const COMBOS = [
 
 // ─────────────────────────── 場外修行 ───────────────────────────
 const OPTS_KEY = 'war-of-ink.opts.v1';
-let opts = {hpbar:true, dmgnum:true};
+let opts = {hpbar:true, dmgnum:true, sfx:true};
 function loadOpts(){
   try { const r = localStorage.getItem(OPTS_KEY); if (r) opts = Object.assign(opts, JSON.parse(r)); } catch {}
 }
@@ -663,6 +771,7 @@ function strike(e, dmg){
   if (!e) return;
   hurt(e, dmg, e.x-p.x, e.y-p.y);
   splat(e.x, e.y, 8, C.dian, 150);
+  SFX.play('bolt');
   const pts = [], n = 5, len = Math.hypot(e.x-p.x, e.y-p.y) || 1;
   for (let i=0;i<=n;i++){
     const t = i/n, off = (i===0 || i===n) ? 0 : (Math.random()-0.5)*44;
@@ -686,6 +795,7 @@ function slam(){
   kick(26);
   splat(p.x, p.y, 34, C.zhu, 320);
   splat(p.x, p.y, 16, C.ink, 200);
+  SFX.play('slam');
   if (p.combo.fen){                          // 焚墨：落地燒起一圈蝕墨
     for (let k=0;k<5;k++){
       const a = (k/5)*Math.PI*2 + Math.random();
@@ -740,6 +850,7 @@ function offerUpgrades(){
     UI.cards.appendChild(d);
   });
   pendingCards = pick;
+  SFX.play('level');
   const rr = document.getElementById('btnReroll');
   document.getElementById('rrLeft').textContent = p.rerolls;
   rr.style.display = p.rerolls > 0 ? '' : 'none';
@@ -796,7 +907,7 @@ function update(dt){
   for (let i=0;i<due;i++){
     const bk = BOSS_KINDS[bossCount++ % BOSS_KINDS.length];
     spawnEnemy('boss_' + bk);
-    if (i === 0){ kick(18); banner = {text: BOSS_NAME[bk], t:0}; }
+    if (i === 0){ kick(18); SFX.play('boss'); banner = {text: BOSS_NAME[bk], t:0}; }
   }
 
   // 自動出筆
@@ -816,6 +927,7 @@ function update(dt){
         r:6, dmg:14*p.dmgMul, life:1.1, pierce:p.pierce, hit:new Set(), a});
     }
     splat(p.x + Math.cos(p.aim)*16, p.y + Math.sin(p.aim)*16, 3, C.zhu, 40);
+    SFX.play('shoot');
   }
 
   // 迴筆
@@ -881,7 +993,7 @@ function update(dt){
         }
       }
       beams.push({x:p.x, y:p.y, a, len, t:0});
-      kick(9);
+      SFX.play('beam'); kick(9);
     }
   }
 
@@ -889,7 +1001,7 @@ function update(dt){
   if (p.ward){
     if (!p.wardUp){
       p.wardT -= dt;
-      if (p.wardT <= 0){ p.wardUp = true; healFx(false); }
+      if (p.wardT <= 0){ p.wardUp = true; healFx(false); SFX.play('ward'); }
     }
   }
 
@@ -925,6 +1037,7 @@ function update(dt){
     if (Math.hypot(al.x-p.x, al.y-p.y) > 2400){ altars.splice(i,1); continue; }
     if ((al.x-p.x)**2 + (al.y-p.y)**2 < (p.r+26)**2){
       al.k.apply();
+      SFX.play('altar');
       banner = {text: al.k.name, t:0};
       splat(al.x, al.y, 26, C.jin, 200);
       kick(10);
@@ -945,6 +1058,7 @@ function update(dt){
         const rr = e.r + b.r;
         if ((e.x-b.x)**2 + (e.y-b.y)**2 < rr*rr){
           hurt(e, b.dmg, b.vx, b.vy);
+          SFX.play('hit');
           if (p.burn){ e.burn = 3; e.burnDps = 6*p.burn*p.dmgMul; }
           b.hit.add(e);
           if (b.pierce-- <= 0){ dead = true; break; }
@@ -1088,6 +1202,7 @@ function update(dt){
 
     if (e.hp <= 0){
       kills++;
+      SFX.play('kill');
       splat(e.x, e.y, e.boss?46:10, e.col, e.boss?260:120);
       if (p.pool && pools.length < 14 && Math.random() < 0.2 + 0.09*p.pool){
         pools.push({x:e.x, y:e.y, r:44 + 9*p.pool, dps:11*p.pool*p.dmgMul,
@@ -1129,7 +1244,7 @@ function update(dt){
       dx = p.x-o.x; dy = p.y-o.y; d = Math.hypot(dx,dy) || 1;
     }
     if (d < p.r + 14){
-      p.xp += o.v; orbs.splice(i,1);
+      p.xp += o.v; orbs.splice(i,1); SFX.play('gem');
       while (p.xp >= p.need){
         p.xp -= p.need; p.lv++; p.need = 5 + p.lv*3; p.pending++;
       }
@@ -1185,13 +1300,14 @@ function damagePlayer(dmg){
     p.wardT = Math.max(5, 14 - p.ward*2);
     p.iframe = 0.7 + p.guard;
     splat(p.x, p.y, 20, C.shuang, 170);
-    kick(8);
+    SFX.play('wardgo'); kick(8);
     return;
   }
   p.hp -= dmg;
   p.iframe = 0.85 + p.guard;
   kick(11);
   splat(p.x, p.y, 12, C.zhu, 150);
+  SFX.play('hurt');
   if (p.hp <= 0){ p.hp = 0; finish(false); }
 }
 
@@ -1227,11 +1343,17 @@ document.getElementById('btnGiveUp').onclick = () => {
 let optsFrom = 'start';
 function renderOpts(){
   const b = document.getElementById('swBar'), n = document.getElementById('swNum');
+  const f = document.getElementById('swSfx');
   b.textContent = opts.hpbar ? '開' : '關';  b.classList.toggle('yes', opts.hpbar);
   n.textContent = opts.dmgnum ? '開' : '關'; n.classList.toggle('yes', opts.dmgnum);
+  f.textContent = opts.sfx ? '開' : '關';    f.classList.toggle('yes', opts.sfx);
 }
 document.getElementById('swBar').onclick = () => { opts.hpbar = !opts.hpbar; saveOpts(); renderOpts(); };
 document.getElementById('swNum').onclick = () => { opts.dmgnum = !opts.dmgnum; saveOpts(); renderOpts(); };
+document.getElementById('swSfx').onclick = () => {
+  opts.sfx = !opts.sfx; saveOpts(); renderOpts();
+  if (opts.sfx){ SFX.unlock(); SFX.play('gem'); }   // 打開時出一聲，讓人知道有效
+};
 const openOpts = from => () => { optsFrom = from; renderOpts(); showVeil(UI.opts); };
 document.getElementById('btnOpts').onclick      = openOpts('start');
 document.getElementById('btnPauseOpts').onclick = openOpts('pause');
@@ -1248,6 +1370,7 @@ function finish(won){
   if (state !== 'play') return;
   paused = false;
   state = won ? 'win' : 'over';
+  SFX.play(won ? 'win' : 'over');
   UI.verdict.textContent = won ? '留白' : '墨盡';
   UI.verdict.className = 'verdict serif ' + (won ? 'win' : 'lose');
   UI.sTime.textContent = fmt(MODE === 'timed' ? Math.min(T, GOAL) : T);
