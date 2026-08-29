@@ -21,17 +21,24 @@
   html,body{margin:0;height:100%;overflow:hidden;background:var(--paper);color:var(--ink)}
   body{
     font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
-    user-select:none;touch-action:none;
+    user-select:none;
   }
+  /* 只有畫布要禁掉手勢，面板要留著捲動 */
+  canvas{touch-action:none}
   .serif{font-family:"Noto Serif TC","Songti TC","Source Han Serif TC","MingLiU",serif}
   canvas{display:block;position:fixed;inset:0}
 
   .veil{
-    position:fixed;inset:0;display:none;place-items:center;
+    position:fixed;inset:0;display:none;
     background:rgba(234,227,210,.82);backdrop-filter:blur(3px);
-    z-index:10;padding:24px;
+    z-index:10;
+    /* 內容比螢幕高時要能捲動。用 flex + margin:auto 置中，
+       align-items:center 在內容過高時會把頂端切掉，不能用。 */
+    overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;
+    padding:24px 20px calc(28px + env(safe-area-inset-bottom));
   }
-  .veil.on{display:grid}
+  .veil.on{display:flex}
+  .veil > .plate{margin:auto;width:100%}
 
   /* ---- 開場 ---- */
   #start .plate{text-align:center;max-width:520px}
@@ -158,7 +165,12 @@
   .danger:hover,.danger:focus-visible{background:var(--zhu);color:var(--paper)}
   #codex .plate{width:100%;max-width:620px}
   #cGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
-  @media(max-width:560px){ #cGrid{grid-template-columns:repeat(4,1fr)} }
+  @media(max-width:560px){
+    #cGrid{grid-template-columns:repeat(4,1fr);gap:6px}
+    .gcell{padding:6px 2px 4px}
+    .gseal{width:32px;height:32px;font-size:17px}
+    .gn{font-size:11px}
+  }
   .gcell{
     border:2px solid rgba(27,26,23,.18);padding:8px 4px 6px;text-align:center;
     cursor:pointer;background:none;font:inherit;
@@ -172,6 +184,28 @@
   .gseal.locked{background:none;border:2px dashed rgba(27,26,23,.28);color:rgba(27,26,23,.3)}
   .gn{font-size:12px;font-weight:700;letter-spacing:.02em;line-height:1.3}
   .gr{font-size:10px;letter-spacing:.14em;margin-top:2px}
+  .reelbox{
+    position:relative;overflow:hidden;height:118px;
+    border-top:2px solid var(--ink);border-bottom:2px solid var(--ink);
+    margin:6px 0 14px;
+    -webkit-mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent);
+    mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent);
+  }
+  .reelstrip{position:absolute;top:11px;left:0;display:flex;gap:8px;will-change:transform}
+  .rtile{
+    width:92px;flex:0 0 92px;text-align:center;border:2px solid rgba(27,26,23,.15);
+    padding:7px 2px;background:var(--paper);
+  }
+  .rtile .gseal{width:34px;height:34px;font-size:18px;margin-bottom:4px}
+  .reelmark{
+    position:absolute;left:50%;top:0;bottom:0;width:104px;transform:translateX(-50%);
+    border-left:2px solid var(--zhu);border-right:2px solid var(--zhu);pointer-events:none;
+  }
+  .rgot{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:4px}
+  .rchip{
+    font-size:12px;border:1.5px solid rgba(27,26,23,.2);padding:3px 8px;letter-spacing:.04em;
+  }
+  .rchip.new{border-color:var(--zhu);color:var(--zhu);font-weight:700}
   .gw{font-size:10px;color:var(--ink-soft);letter-spacing:.04em;margin-top:1px}
   .gsash{font-size:10px;color:var(--jin);letter-spacing:.1em;height:12px}
   .ver{position:fixed;right:12px;bottom:10px;font-size:11px;letter-spacing:.14em;
@@ -201,6 +235,7 @@
     <div>
       <button class="link" id="btnMeta">修行</button>
       <button class="link" id="btnPeek">觀榜</button>
+      <button class="link" id="btnCodexHome">印譜</button>
       <button class="link" id="btnOpts">設定</button>
     </div>
   </div>
@@ -247,6 +282,21 @@
       <button class="sw serif" id="swSfx">開</button>
     </div>
     <button class="go serif" id="btnOptsBack">回　去</button>
+  </div>
+</div>
+
+<div class="veil" id="reel">
+  <div class="plate" style="max-width:560px">
+    <div class="lvl-head"><h2 class="serif">開　印</h2><small id="rSub">　</small></div>
+    <div class="reelbox">
+      <div class="reelstrip" id="rStrip"></div>
+      <div class="reelmark"></div>
+    </div>
+    <p class="muted" id="rText" style="min-height:38px">　</p>
+    <div class="modes">
+      <button class="go serif" id="btnSkip">跳　過</button>
+      <button class="go serif" id="btnReelDone" style="display:none">收　下</button>
+    </div>
   </div>
 </div>
 
@@ -315,7 +365,7 @@
 (() => {
 "use strict";
 
-const VER = "v1.1";
+const VER = "v1.2";
 document.getElementById("verTag").textContent = VER;
 
 // ─────────────────────────── 畫布 ───────────────────────────
@@ -534,6 +584,10 @@ const UI = {
   cOwn:  document.getElementById('cOwn'),
   cGrid: document.getElementById('cGrid'),
   cResult: document.getElementById('cResult'),
+  reel:  document.getElementById('reel'),
+  rStrip: document.getElementById('rStrip'),
+  rText: document.getElementById('rText'),
+  rSub:  document.getElementById('rSub'),
   pause: document.getElementById('pause'),
   opts:  document.getElementById('opts'),
   mPts:  document.getElementById('mPts'),
@@ -546,7 +600,7 @@ const UI = {
   boardMsg:document.getElementById('boardMsg'),
   boardTitle: document.getElementById('boardTitle')
 };
-const VEILS = ['start','lvl','end','meta','pause','opts','codex'];
+const VEILS = ['start','lvl','end','meta','pause','opts','codex','reel'];
 const showVeil = el => { for (const k of VEILS) UI[k].classList.toggle('on', UI[k] === el); };
 const hideVeils = () => { for (const k of VEILS) UI[k].classList.remove('on'); };
 
@@ -1702,6 +1756,78 @@ function renderCodex(){
   }
 }
 
+// ── 轉獎：由左往右捲，愈捲愈慢，停在中線那格 ──
+const TILE = 100;                       // 92px + 8px gap
+let reelRAF = 0, reelDone = null;
+
+function reelTile(g, dim){
+  return `<div class="rtile" ${dim ? 'style="opacity:.55"' : ''}>
+    <div class="gseal" style="background:${g.body}">${g.ch}</div>
+    <div class="gn serif">${g.n}</div>
+    <div class="gr" style="color:${RARITY[g.r].col}">${g.base ? '初' : RARITY[g.r].n}</div>
+  </div>`;
+}
+
+function stopReel(){
+  if (reelRAF){ cancelAnimationFrame(reelRAF); reelRAF = 0; }
+}
+
+function showReel(got){
+  // 轉盤停在最稀有的那張；十抽的其餘結果等停下來再一次列出
+  const star = got.reduce((a, r) => r.g.r > a.g.r ? r : a, got[0]);
+  const pool = GENERALS.filter(g => !g.base);
+  const WIN = 34;                                    // 中獎格在第幾格
+  const list = [];
+  for (let i=0;i<WIN;i++) list.push(pool[Math.random()*pool.length|0]);
+  list.push(star.g);
+  for (let i=0;i<8;i++) list.push(pool[Math.random()*pool.length|0]);
+  UI.rStrip.innerHTML = list.map((g,i) => reelTile(g, i !== WIN)).join('');
+
+  UI.rSub.textContent = got.length > 1 ? got.length + ' 連' : '　';
+  UI.rText.textContent = '　';
+  const skip = document.getElementById('btnSkip');
+  const done = document.getElementById('btnReelDone');
+  skip.style.display = ''; done.style.display = 'none';
+  showVeil(UI.reel);
+
+  const box = UI.reel.querySelector('.reelbox');
+  const endX = () => box.clientWidth/2 - (WIN*TILE + 46);
+  const startX = endX() - TILE*WIN;                  // 由左而右捲過去
+  const DUR = 2600;
+  const t0 = performance.now();
+  let lastIdx = -1;
+
+  const finish = () => {
+    stopReel();
+    UI.rStrip.style.transform = `translateX(${endX()}px)`;
+    UI.rStrip.children[WIN].style.opacity = '1';
+    const New = got.filter(r => !r.dup);
+    const back = got.reduce((a, r) => a + r.back, 0);
+    UI.rText.innerHTML = '<div class="rgot">' + got.map(r =>
+      `<span class="rchip${r.dup ? '' : ' new'}">${r.g.n}${r.dup ? ' 綬'+r.lv : ' 新'}</span>`
+    ).join('') + '</div>' + (back ? `<div style="margin-top:6px">重複退還 ${back} 筆意</div>` : '');
+    skip.style.display = 'none'; done.style.display = '';
+    SFX.play(New.some(r => r.g.r >= 2) ? 'altar' : 'gem');
+    reelDone = null;
+  };
+  reelDone = finish;
+
+  const step = now => {
+    const k = Math.min(1, (now - t0)/DUR);
+    const e = 1 - Math.pow(1 - k, 3);                // 先快後慢
+    const x = startX + (endX() - startX)*e;
+    UI.rStrip.style.transform = `translateX(${x}px)`;
+    const idx = Math.round((box.clientWidth/2 - x - 46)/TILE);
+    if (idx !== lastIdx){ lastIdx = idx; SFX.play('hit'); }   // 格子跳動時的喀噠聲
+    if (k < 1) reelRAF = requestAnimationFrame(step);
+    else finish();
+  };
+  reelRAF = requestAnimationFrame(step);
+}
+
+document.getElementById('btnSkip').onclick = () => { if (reelDone) reelDone(); };
+document.getElementById('btnReelDone').onclick = () => { stopReel(); renderCodex(); showVeil(UI.codex); };
+
 function doDraw(n){
   const cost = n === 10 ? TEN_COST : DRAW_COST;
   if (meta.pts < cost){ UI.cResult.textContent = '筆意不夠。再打幾場。'; return; }
@@ -1712,20 +1838,13 @@ function doDraw(n){
     got.push(rollOne(n === 10 && i === n-1 && !got.some(r => r.g.r >= 2) ? 2 : undefined));
   }
   saveMeta();
-  const New = got.filter(r => !r.dup);
-  const back = got.reduce((a, r) => a + r.back, 0);
-  const parts = [];
-  if (New.length) parts.push('新得 ' + New.map(r => `${r.g.n}（${RARITY[r.g.r].n}）`).join('、'));
-  const dups = got.filter(r => r.dup);
-  if (dups.length) parts.push(`重複 ${dups.length} 張，升綬並退還 ${back} 筆意`);
-  UI.cResult.textContent = parts.join('　·　') || '什麼都沒抽到？';
-  if (New.some(r => r.g.r >= 2)) SFX.play('altar'); else SFX.play('gem');
-  renderCodex();
+  showReel(got);
 }
 document.getElementById('btnDraw1').onclick  = () => doDraw(1);
 document.getElementById('btnDraw10').onclick = () => doDraw(10);
-document.getElementById('btnCodex').onclick  = () => { renderCodex(); showVeil(UI.codex); };
-document.getElementById('btnCodexBack').onclick = () => { renderMeta(); showVeil(UI.meta); };
+document.getElementById('btnCodex').onclick     = () => { renderCodex(); showVeil(UI.codex); };
+document.getElementById('btnCodexHome').onclick = () => { renderCodex(); showVeil(UI.codex); };
+document.getElementById('btnCodexBack').onclick = () => { showVeil(UI.start); };
 
 document.getElementById('btnPeek').onclick = () => {
   lastRun = null; myId = null; syncTabs();
