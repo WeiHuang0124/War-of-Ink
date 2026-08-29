@@ -74,6 +74,9 @@
   }
   .card .n{font-size:20px;font-weight:900;letter-spacing:.06em;margin:4px 0 8px}
   .card .d{font-size:13px;line-height:1.75;color:var(--ink-soft);min-height:44px}
+  .card.combo{border-color:var(--jin);background:#F3EDDC;grid-column:1/-1}
+  .card.combo .k{background:var(--jin)}
+  .card.combo .n{color:var(--jin)}
   .card .lv{margin-top:12px;font-size:12px;letter-spacing:.14em;color:var(--zhu);font-weight:700}
   @media(max-width:620px){
     #cards{grid-template-columns:1fr}
@@ -269,7 +272,7 @@
 (() => {
 "use strict";
 
-const VER = "v0.7";
+const VER = "v0.8";
 document.getElementById("verTag").textContent = VER;
 
 // ─────────────────────────── 畫布 ───────────────────────────
@@ -398,12 +401,32 @@ const hideVeils = () => { for (const k of VEILS) UI[k].classList.remove('on'); }
 
 let state = 'menu', paused = false;
 let p, enemies, bullets, foeShots, orbs, motes, novas, big, slashes, nums, bolts;
+let beams, pools, altars, altarT;
 let T, kills, spawnT, shake, shakeT, bossQueue, camX, camY;
 let pendingCards = [];
 let banner = null;
 let MODE = 'timed';                       // 'timed' | 'endless'
 let nextBoss = 0, bossCount = 0;
 const GOAL = 300; // 五分鐘
+
+// 地上的祭壇，走過去就吃到，效果持續整場
+const ALTARS = [
+  {name:'力　碑', apply:()=>p.dmgMul *= 1.12},
+  {name:'疾　碑', apply:()=>p.cdMul  *= 0.92},
+  {name:'韌　碑', apply:()=>{p.maxHp += 20; p.hp = Math.min(p.maxHp, p.hp + 40); healFx(true);}},
+  {name:'迅　碑', apply:()=>{ p.spd = Math.min(p.spd*1.06, p.spdBase*1.5); }},
+  {name:'悟　碑', apply:()=>{p.pending += 1;}}
+];
+
+// 合筆：兩門技能都練滿才會出現，出現時是唯一的選項
+const COMBOS = [
+  {id:'fen',    name:'焚　墨', desc:'潑墨落地時燒起一片蝕墨，墨龍也附帶灼燒。',
+   need:p => p.up.burn >= 4 && p.up.nova >= 4},
+  {id:'shuang', name:'霜　刃', desc:'迴筆對凍住的墨傷害翻倍，滲血也更久。',
+   need:p => p.up.frost >= 4 && p.up.blade >= 4},
+  {id:'lei',    name:'貫　雷', desc:'筆鋒穿透時引下一道落雷。',
+   need:p => p.up.bolt >= 4 && p.up.pierce >= 3}
+];
 
 // ─────────────────────────── 場外修行 ───────────────────────────
 const OPTS_KEY = 'war-of-ink.opts.v1';
@@ -454,24 +477,31 @@ const UPGRADES = [
   {id:'bolt',  name:'驚電',   desc:'不時劈中場上的墨，等級越高一次劈越多。', max:4, apply:()=>{p.bolt += 1; p.boltT = 0.6;}},
   {id:'burn',  name:'焦墨',   desc:'筆鋒帶灼，中筆的墨會持續焦化。',        max:4, apply:()=>p.burn += 1},
   {id:'frost', name:'凍硯',   desc:'身周結霜，靠近的墨變慢並持續受損。',    max:4, apply:()=>p.frost += 1},
+  {id:'beam',  name:'墨龍',   desc:'定時朝敵人噴出一道貫穿全場的墨柱。',   max:4, apply:()=>{p.beam += 1; p.beamT = 0.8;}},
+  {id:'pool',  name:'硯池',   desc:'墨死時有機會留下一灘蝕墨，踩到就掉血。', max:4, apply:()=>p.pool += 1},
+  {id:'ward',  name:'紙甲',   desc:'定時結一層紙甲，擋掉一次傷害。',       max:4, apply:()=>{p.ward += 1; p.wardT = 1;}},
   {id:'nova',  name:'潑墨',   desc:'定時向四周炸開一圈朱墨。',          max:4, apply:()=>{p.nova += 1; p.novaT = 0.5;}}
 ];
 
 function reset(){
   const hp0 = 100 + mlv('base_hp')*15;
   p = {
-    x:0, y:0, r:14, hp:hp0, maxHp:hp0, spd:190*(1 + mlv('stride')*0.04),
+    x:0, y:0, r:14, hp:hp0, maxHp:hp0,
+    spd:190*(1 + mlv('stride')*0.04), spdBase:190*(1 + mlv('stride')*0.04),
     lv:1, xp:0, need:5, pending:mlv('insight'),
     rerolls: mlv('reroll'), guard: mlv('guard')*0.12, regenFx:0,
     dmgMul:1 + mlv('edge')*0.08, cdMul:1, shots:1, pierce:0, regen:0,
     pick:120*(1 + mlv('reach')*0.15),
     blades:0, bladeAng:0, nova:0, novaT:0,
     bolt:0, boltT:0, burn:0, frost:0, frostT:0,
+    beam:0, beamT:0, pool:0, ward:0, wardT:0, wardUp:false,
+    combo:{fen:false, shuang:false, lei:false},
     cd:0, iframe:0, aim:-Math.PI/2, tilt:0,
     up:Object.fromEntries(UPGRADES.map(u=>[u.id,0]))
   };
   enemies=[]; bullets=[]; foeShots=[]; orbs=[]; motes=[]; novas=[]; big=[]; slashes=[];
-  nums=[]; bolts=[];
+  nums=[]; bolts=[]; beams=[]; pools=[]; altars=[];
+  altarT = 16;
   T=0; kills=0; spawnT=0.6; shake=0; shakeT=0; camX=0; camY=0; paused=false;
   bossQueue = [85, 160, 225, 278];
   nextBoss = 70; bossCount = 0;
@@ -503,6 +533,16 @@ const BOSS_NAME = {
   yan: '硯獸　衝來'
 };
 
+// 無盡模式後段改成複利，不然玩家的乘算成長會直接輾過線性的敵人
+function hpScale(){
+  const lin = 1 + T*0.011;
+  return MODE === 'endless' ? lin * Math.pow(1.05, T/30) : lin;
+}
+// 撞擊傷害也要跟著長，不然後期敵人只是肉盾
+function dmgScale(){
+  return MODE === 'endless' ? 1 + T/300 : 1;
+}
+
 function makeLobes(n){
   const a = [];
   for (let i=0;i<n;i++) a.push({
@@ -518,17 +558,17 @@ function spawnEnemy(kind){
   const t = TYPES[kind];
   const ang = Math.random()*Math.PI*2;
   const dist = Math.hypot(W,H)/2 + 90;
-  const scale = 1 + T*0.012;
+  const scale = hpScale();
   const e = {
     kind, x: p.x + Math.cos(ang)*dist, y: p.y + Math.sin(ang)*dist,
     r: t.r, hp: t.hp*scale, maxHp: t.hp*scale, spd: t.spd*(0.9+Math.random()*0.2),
-    dmg: t.dmg, xp: t.xp, col: t.col, boss: !!t.boss,
+    dmg: t.dmg*dmgScale(), xp: t.xp, col: t.col, boss: !!t.boss,
     lobes: makeLobes(t.lobes), flash:0, wob: Math.random()*10,
     shootT: t.shoot ? Math.random()*t.shoot : 0, shoot: t.shoot||0,
     kx:0, ky:0, bk: t.boss || null,
     chT: 1.6, phase: 'wind', dvx: 0, dvy: 0, sumT: 2.0
   };
-  if (e.boss){ e.hp = e.maxHp = t.hp*(1+T*0.010); big.push(e); }
+  if (e.boss){ e.hp = e.maxHp = t.hp*hpScale()*0.85; big.push(e); }
   enemies.push(e);
   return e;
 }
@@ -618,6 +658,20 @@ function addNum(e, amount, dot){
   nums.push(n); e.numRef = n;
 }
 
+// 對單一目標劈一道電，驚電與貫雷共用
+function strike(e, dmg){
+  if (!e) return;
+  hurt(e, dmg, e.x-p.x, e.y-p.y);
+  splat(e.x, e.y, 8, C.dian, 150);
+  const pts = [], n = 5, len = Math.hypot(e.x-p.x, e.y-p.y) || 1;
+  for (let i=0;i<=n;i++){
+    const t = i/n, off = (i===0 || i===n) ? 0 : (Math.random()-0.5)*44;
+    pts.push([p.x + (e.x-p.x)*t - (e.y-p.y)/len*off,
+              p.y + (e.y-p.y)*t + (e.x-p.x)/len*off]);
+  }
+  bolts.push({pts, t:0});
+}
+
 function kick(m){ shake = Math.max(shake, m); shakeT = 0.22; }
 
 const novaCd = () => Math.max(1.8, 6 - p.nova*0.9);
@@ -632,10 +686,43 @@ function slam(){
   kick(26);
   splat(p.x, p.y, 34, C.zhu, 320);
   splat(p.x, p.y, 16, C.ink, 200);
+  if (p.combo.fen){                          // 焚墨：落地燒起一圈蝕墨
+    for (let k=0;k<5;k++){
+      const a = (k/5)*Math.PI*2 + Math.random();
+      pools.push({x:p.x+Math.cos(a)*72, y:p.y+Math.sin(a)*72,
+                  r:52, dps:14*Math.max(1,p.pool)*p.dmgMul,
+                  life:4.5, t:0, tick:0, lobes:makeLobes(5), fire:true});
+    }
+  }
 }
 
 // ─────────────────────────── 升級 ───────────────────────────
 function offerUpgrades(){
+  // 合筆條件到了就強制推上來，這是玩家等待的獎勵
+  const combo = COMBOS.find(c => !p.combo[c.id] && c.need(p));
+  if (combo){
+    UI.cards.innerHTML = '';
+    const d = document.createElement('div');
+    d.className = 'card combo'; d.tabIndex = 0;
+    d.innerHTML = `<div class="k serif">合</div>
+      <div class="n serif">${combo.name}</div>
+      <div class="d">${combo.desc}</div>
+      <div class="lv">兩門筆意相濟</div>`;
+    const take = () => {
+      p.combo[combo.id] = true; p.pending--;
+      pendingCards = [];
+      if (p.pending > 0) offerUpgrades(); else { hideVeils(); state = 'play'; }
+    };
+    d.onclick = take;
+    d.onkeydown = ev => { if (ev.key === 'Enter') take(); };
+    UI.cards.appendChild(d);
+    pendingCards = [{apply:take, isCombo:true}];
+    document.getElementById('btnReroll').style.display = 'none';
+    showVeil(UI.lvl);
+    state = 'levelup';
+    return;
+  }
+
   const pool = UPGRADES.filter(u => p.up[u.id] < u.max);
   if (!pool.length){ p.hp = Math.min(p.maxHp, p.hp + 30); p.pending--; return; }
   const copy = pool.slice(), pick = [];
@@ -752,18 +839,9 @@ function update(dt){
     if (p.boltT <= 0){
       p.boltT = Math.max(1.1, 3.2 - p.bolt*0.45);
       const reach = Math.hypot(W, H)/2;
-      const pool = enemies.filter(e => Math.hypot(e.x-p.x, e.y-p.y) < reach);
-      for (let k=0; k<Math.min(p.bolt+1, pool.length); k++){
-        const e = pool.splice(Math.random()*pool.length|0, 1)[0];
-        hurt(e, 30*p.bolt*p.dmgMul, e.x-p.x, e.y-p.y);
-        splat(e.x, e.y, 8, C.dian, 150);
-        const pts = [], n = 5;
-        for (let i=0;i<=n;i++){
-          const t = i/n, off = i===0 || i===n ? 0 : (Math.random()-0.5)*44;
-          pts.push([p.x + (e.x-p.x)*t - (e.y-p.y)/reach*off,
-                    p.y + (e.y-p.y)*t + (e.x-p.x)/reach*off]);
-        }
-        bolts.push({pts, t:0});
+      const cand = enemies.filter(e => Math.hypot(e.x-p.x, e.y-p.y) < reach);
+      for (let k=0; k<Math.min(p.bolt+1, cand.length); k++){
+        strike(cand.splice(Math.random()*cand.length|0, 1)[0], 30*p.bolt*p.dmgMul);
       }
       if (p.bolt) kick(6);
     }
@@ -777,7 +855,7 @@ function update(dt){
     const R = 92 + p.frost*26;
     for (const e of enemies){
       if ((e.x-p.x)**2 + (e.y-p.y)**2 < R*R){
-        e.chill = 0.35;
+        if (!e.boss) e.chill = 0.35;         // 墨王不吃緩速
         if (tick) hurt(e, 5*p.frost*p.dmgMul, 0, 0, true);
       }
     }
@@ -787,6 +865,71 @@ function update(dt){
     n.t += dt;
     n.r = n.max * Math.min(1, Math.max(0, n.t)/0.45);
     if (n.t > 0.6) novas.splice(i,1);
+  }
+
+  // 墨龍：朝目標噴一道貫穿墨柱
+  if (p.beam){
+    p.beamT -= dt;
+    if (p.beamT <= 0 && enemies.length){
+      p.beamT = Math.max(2.2, 5.5 - p.beam*0.8);
+      const len = 950, a = p.aim;
+      const ex = p.x + Math.cos(a)*len, ey = p.y + Math.sin(a)*len;
+      for (const e of enemies){
+        if (segDist(e.x, e.y, p.x, p.y, ex, ey) < e.r + 15){
+          hurt(e, 55*p.beam*p.dmgMul, Math.cos(a), Math.sin(a));
+          if (p.combo.fen){ e.burn = 3; e.burnDps = 6*Math.max(1,p.burn)*p.dmgMul; }
+        }
+      }
+      beams.push({x:p.x, y:p.y, a, len, t:0});
+      kick(9);
+    }
+  }
+
+  // 紙甲：定時結一層，擋一次
+  if (p.ward){
+    if (!p.wardUp){
+      p.wardT -= dt;
+      if (p.wardT <= 0){ p.wardUp = true; healFx(false); }
+    }
+  }
+
+  // 蝕墨池
+  for (let i=pools.length-1;i>=0;i--){
+    const pl = pools[i];
+    pl.t += dt; pl.tick -= dt;
+    if (pl.tick <= 0){
+      pl.tick = 0.4;
+      for (const e of enemies){
+        if ((e.x-pl.x)**2 + (e.y-pl.y)**2 < (pl.r+e.r)**2) hurt(e, pl.dps*0.4, 0, 0, true);
+      }
+    }
+    if (pl.t > pl.life) pools.splice(i,1);
+  }
+
+  for (let i=beams.length-1;i>=0;i--){
+    beams[i].t += dt;
+    if (beams[i].t > 0.4) beams.splice(i,1);
+  }
+
+  // 祭壇：定時在遠處生一座，走過去就吃到
+  altarT -= dt;
+  if (altarT <= 0 && altars.length < 3){
+    altarT = 22;
+    const a = Math.random()*Math.PI*2, d = 480 + Math.random()*420;
+    const k = ALTARS[Math.random()*ALTARS.length|0];
+    altars.push({x:p.x+Math.cos(a)*d, y:p.y+Math.sin(a)*d, k, t:0});
+  }
+  for (let i=altars.length-1;i>=0;i--){
+    const al = altars[i];
+    al.t += dt;
+    if (Math.hypot(al.x-p.x, al.y-p.y) > 2400){ altars.splice(i,1); continue; }
+    if ((al.x-p.x)**2 + (al.y-p.y)**2 < (p.r+26)**2){
+      al.k.apply();
+      banner = {text: al.k.name, t:0};
+      splat(al.x, al.y, 26, C.jin, 200);
+      kick(10);
+      altars.splice(i,1);
+    }
   }
 
   buildGrid();
@@ -807,6 +950,7 @@ function update(dt){
           if (b.pierce-- <= 0){ dead = true; break; }
           // 還有穿透次數 → 畫一道貫穿
           slashes.push({x:e.x, y:e.y, a:Math.atan2(b.vy, b.vx), t:0});
+          if (p.combo.lei && Math.random() < 0.35) strike(e, 26*Math.max(1,p.bolt)*p.dmgMul);
           splat(e.x, e.y, 6, C.zhu, 130);
         }
       }
@@ -831,6 +975,14 @@ function update(dt){
         motes.push({x:e.x+(Math.random()-0.5)*e.r*1.4, y:e.y+(Math.random()-0.5)*e.r*1.4,
                     vx:(Math.random()-0.5)*20, vy:-30-Math.random()*40,
                     r:1+Math.random()*2, life:0.5, t:0, col:C.huo});
+    }
+    if (e.bleed > 0){                      // 迴筆造成的滲血
+      e.bleed -= dt;
+      hurt(e, e.bleedDps*dt, 0, 0, true);
+      if (Math.random() < dt*5)
+        motes.push({x:e.x+(Math.random()-0.5)*e.r*1.2, y:e.y+(Math.random()-0.5)*e.r*1.2,
+                    vx:(Math.random()-0.5)*24, vy:20+Math.random()*40,
+                    r:1+Math.random()*2, life:0.55, t:0, col:C.zhu});
     }
     let chillMul = 1;
     if (e.chill > 0){                      // 凍硯的減速
@@ -910,7 +1062,11 @@ function update(dt){
         const bx = p.x + ca*(BLADE_IN+len), by = p.y + sa*(BLADE_IN+len);
         if (segDist(e.x, e.y, ax, ay, bx, by) < e.r + 8){
           e.bladeCd = 0.4;
-          hurt(e, 13*p.dmgMul*(1 + 0.2*(p.up.blade-1)), e.x-p.x, e.y-p.y);
+          const chilled = e.chill > 0;
+          const mul = (p.combo.shuang && chilled) ? 2 : 1;
+          hurt(e, 13*p.dmgMul*(1 + 0.2*(p.up.blade-1))*mul, e.x-p.x, e.y-p.y);
+          e.bleed = p.combo.shuang ? 6 : 4;    // 迴筆會割出傷口，持續滲血
+          e.bleedDps = 7*p.up.blade*p.dmgMul;
           break;
         }
       }
@@ -933,6 +1089,10 @@ function update(dt){
     if (e.hp <= 0){
       kills++;
       splat(e.x, e.y, e.boss?46:10, e.col, e.boss?260:120);
+      if (p.pool && pools.length < 14 && Math.random() < 0.2 + 0.09*p.pool){
+        pools.push({x:e.x, y:e.y, r:44 + 9*p.pool, dps:11*p.pool*p.dmgMul,
+                    life:4, t:0, tick:0, lobes:makeLobes(5)});
+      }
       for (let k=0;k<(e.boss?12:1);k++)
         orbs.push({x:e.x+(Math.random()-0.5)*e.r, y:e.y+(Math.random()-0.5)*e.r,
                    v:e.boss?4:e.xp, vx:0, vy:0, t:Math.random()*6});
@@ -1020,6 +1180,14 @@ function hurt(e, dmg, kx, ky, dot){
 
 function damagePlayer(dmg){
   if (state !== 'play') return;
+  if (p.wardUp){                            // 紙甲擋掉這一下
+    p.wardUp = false;
+    p.wardT = Math.max(5, 14 - p.ward*2);
+    p.iframe = 0.7 + p.guard;
+    splat(p.x, p.y, 20, C.shuang, 170);
+    kick(8);
+    return;
+  }
   p.hp -= dmg;
   p.iframe = 0.85 + p.guard;
   kick(11);
@@ -1274,6 +1442,12 @@ function draw(){
   for (let y=y0;y<y1;y+=g){ ctx.moveTo(x0, y); ctx.lineTo(x1, y); }
   ctx.stroke();
 
+  // 蝕墨池
+  for (const pl of pools){
+    const k = Math.min(1, (pl.life - pl.t)/0.8);
+    inkBlob(pl.x, pl.y, pl.r*k, pl.lobes, pl.t*0.6, pl.fire ? C.huo : C.ink, pl.fire ? 0.30 : 0.24);
+  }
+
   // 凍硯的霜圈
   if (p.frost){
     const R = 92 + p.frost*26;
@@ -1380,6 +1554,21 @@ function draw(){
     ctx.globalAlpha = 1;
   }
 
+  // 墨龍
+  for (const bm of beams){
+    const k = Math.max(0, 1 - bm.t/0.4);
+    const ca = Math.cos(bm.a), sa = Math.sin(bm.a), nx = -sa, ny = ca;
+    const w = 15*k + 3;
+    ctx.beginPath();
+    ctx.moveTo(bm.x + nx*w, bm.y + ny*w);
+    ctx.quadraticCurveTo(bm.x + ca*bm.len*0.5 + nx*w*1.6, bm.y + sa*bm.len*0.5 + ny*w*1.6,
+                         bm.x + ca*bm.len, bm.y + sa*bm.len);
+    ctx.quadraticCurveTo(bm.x + ca*bm.len*0.5 - nx*w*1.6, bm.y + sa*bm.len*0.5 - ny*w*1.6,
+                         bm.x - nx*w, bm.y - ny*w);
+    ctx.closePath();
+    ctx.fillStyle = C.ink; ctx.globalAlpha = k*0.8; ctx.fill(); ctx.globalAlpha = 1;
+  }
+
   // 驚電
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   for (const bl of bolts){
@@ -1390,6 +1579,23 @@ function draw(){
     ctx.strokeStyle = C.dian; ctx.globalAlpha = k*0.28; ctx.lineWidth = 9*k; ctx.stroke();
     ctx.globalAlpha = k*0.95; ctx.lineWidth = 2.6*k + 0.6; ctx.stroke();
     ctx.globalAlpha = 1;
+  }
+
+  // 祭壇
+  for (const al of altars){
+    const pulse = 1 + Math.sin(al.t*3)*0.06;
+    ctx.save(); ctx.translate(al.x, al.y); ctx.scale(pulse, pulse);
+    ctx.beginPath(); rrect(-17, -17, 34, 34, 5);
+    ctx.globalAlpha = .16; ctx.fillStyle = C.jin; ctx.fill();
+    ctx.globalAlpha = .9;  ctx.strokeStyle = C.jin; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.globalAlpha = .95; ctx.fillStyle = C.jin;
+    ctx.font = '800 17px "Noto Serif TC","Songti TC",serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(al.k.name[0], 0, 1);
+    ctx.globalAlpha = Math.max(0, 0.5 - (al.t % 1.6)/3.2);
+    ctx.beginPath(); ctx.arc(0, 0, 20 + (al.t % 1.6)*26, 0, Math.PI*2);
+    ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore(); ctx.globalAlpha = 1;
   }
 
   // 印
@@ -1450,6 +1656,13 @@ function draw(){
   ctx.globalAlpha = 1;
   ctx.restore();
 
+  if (p.wardUp){                             // 紙甲
+    ctx.beginPath(); ctx.arc(p.x, p.y, 27, 0, Math.PI*2);
+    ctx.globalAlpha = .10; ctx.fillStyle = C.shuang; ctx.fill();
+    ctx.globalAlpha = .85; ctx.strokeStyle = C.shuang; ctx.lineWidth = 2.4; ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   // 碎墨
   for (const m of motes){
     const k = 1 - m.t/m.life;
@@ -1504,30 +1717,49 @@ function drawHUD(){
   ctx.fillText(`筆力 ${p.lv}　化墨 ${kills}`, pad, pad + 26);
   ctx.globalAlpha = 1;
 
-  // 潑墨讀取盤
-  if (p.nova){
-    const cx = pad + 17, cy = pad + 62, R = 15;
-    const prog = p.slamT > 0 ? 1 : 1 - Math.max(0, p.novaT)/novaCd();
+  // 技能盤：所有學到的技能都列出來，有冷卻的畫進度環，被動的畫等級點
+  const SLOTS = [
+    {have:()=>p.nova,  ch:'潑', cd:()=>p.slamT > 0 ? 0 : Math.max(0, p.novaT), max:novaCd, lv:()=>p.up.nova},
+    {have:()=>p.bolt,  ch:'電', cd:()=>Math.max(0, p.boltT), max:()=>Math.max(1.1, 3.2 - p.bolt*0.45), lv:()=>p.up.bolt},
+    {have:()=>p.beam,  ch:'龍', cd:()=>Math.max(0, p.beamT), max:()=>Math.max(2.2, 5.5 - p.beam*0.8), lv:()=>p.up.beam},
+    {have:()=>p.ward,  ch:'甲', cd:()=>p.wardUp ? 0 : Math.max(0, p.wardT), max:()=>Math.max(5, 14 - p.ward*2), lv:()=>p.up.ward},
+    {have:()=>p.blades,ch:'迴', lv:()=>p.up.blade},
+    {have:()=>p.frost, ch:'凍', lv:()=>p.up.frost},
+    {have:()=>p.burn,  ch:'焦', lv:()=>p.up.burn},
+    {have:()=>p.pool,  ch:'硯', lv:()=>p.up.pool}
+  ];
+  const active = SLOTS.filter(sl => sl.have());
+  const R = 15, gap = 40;
+  active.forEach((sl, i) => {
+    const cx = pad + 17 + i*gap, cy = pad + 62;
+    const timed = !!sl.cd;
+    const prog = timed ? 1 - sl.cd()/sl.max() : 1;
     const ready = prog >= 1;
     ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2);
     ctx.strokeStyle = 'rgba(27,26,23,.15)'; ctx.lineWidth = 4; ctx.stroke();
-    ctx.beginPath(); ctx.arc(cx, cy, R, -Math.PI/2, -Math.PI/2 + Math.PI*2*prog);
-    ctx.strokeStyle = ready ? C.zhu : C.ink; ctx.lineWidth = 4; ctx.stroke();
-    if (ready){
+    if (timed){
+      ctx.beginPath(); ctx.arc(cx, cy, R, -Math.PI/2, -Math.PI/2 + Math.PI*2*Math.min(1, prog));
+      ctx.strokeStyle = ready ? C.zhu : C.ink; ctx.lineWidth = 4; ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2);
+      ctx.strokeStyle = 'rgba(27,26,23,.5)'; ctx.lineWidth = 4; ctx.stroke();
+    }
+    if (timed && ready){
       ctx.beginPath(); ctx.arc(cx, cy, R + 4 + Math.sin(T*9)*2, 0, Math.PI*2);
       ctx.strokeStyle = C.zhu; ctx.lineWidth = 1.5;
       ctx.globalAlpha = .35; ctx.stroke(); ctx.globalAlpha = 1;
     }
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = '700 14px "Noto Serif TC","Songti TC",serif';
-    ctx.fillStyle = ready ? C.zhu : 'rgba(27,26,23,.45)';
-    ctx.fillText('潑', cx, cy + 1);
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.font = '600 11px system-ui,sans-serif';
-    ctx.globalAlpha = .5;
-    ctx.fillText(ready ? '就緒' : '蓄墨中', cx + R + 8, cy - 5);
-    ctx.globalAlpha = 1;
-  }
+    ctx.fillStyle = (timed && !ready) ? 'rgba(27,26,23,.45)' : C.ink;
+    ctx.fillText(sl.ch, cx, cy + 1);
+    const n = sl.lv();                       // 等級點
+    for (let k=0;k<n;k++){
+      ctx.beginPath();
+      ctx.arc(cx - (n-1)*3 + k*6, cy + R + 7, 1.8, 0, Math.PI*2);
+      ctx.fillStyle = C.zhu; ctx.globalAlpha = .8; ctx.fill(); ctx.globalAlpha = 1;
+    }
+  });
 
   // 倒數
   ctx.font = '800 30px "Noto Serif TC","Songti TC",serif';
