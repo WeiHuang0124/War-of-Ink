@@ -18,7 +18,8 @@ const json = (body, status = 200) =>
     }
   });
 
-const asMode = v => (v === 'endless' ? 'endless' : 'timed');
+const MODES = ['timed', 'endless', 'rpg'];
+const asMode = v => (MODES.includes(v) ? v : 'timed');
 
 async function fetchTop(db, mode) {
   const { results } = await db

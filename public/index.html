@@ -208,6 +208,14 @@
   .rchip.new{border-color:var(--zhu);color:var(--zhu);font-weight:700}
   .gw{font-size:10px;color:var(--ink-soft);letter-spacing:.04em;margin-top:1px}
   .gsash{font-size:10px;color:var(--jin);letter-spacing:.1em;height:12px}
+  .chk{display:flex;align-items:center;gap:9px;margin-top:16px;font-size:13px;
+       color:var(--ink-soft);cursor:pointer;letter-spacing:.06em}
+  .chk input{width:18px;height:18px;accent-color:var(--zhu);cursor:pointer}
+  .sec{border-top:1px solid rgba(27,26,23,.14);padding:13px 0}
+  .sec:first-child{border-top:none;padding-top:2px}
+  .sec h4{margin:0 0 6px;font-size:16px;font-weight:900;letter-spacing:.08em}
+  .sec p{margin:0;font-size:13px;line-height:1.85;color:var(--ink-soft)}
+  .sec b{color:var(--ink)}
   .ver{position:fixed;right:12px;bottom:10px;font-size:11px;letter-spacing:.14em;
        color:var(--ink-soft);opacity:.6;z-index:20;pointer-events:none}
   .verdict{font-size:clamp(58px,15vw,108px);margin:0;font-weight:900;letter-spacing:.15em}
@@ -230,6 +238,7 @@
     <div class="modes">
       <button class="go serif" id="btnStart">五分鐘</button>
       <button class="go serif" id="btnEndless">無　盡</button>
+      <button class="go serif" id="btnRpg">修　羅</button>
     </div>
     <p class="keys">WASD／方向鍵移動 · 自動出筆 · 手機直接拖曳</p>
     <div>
@@ -281,7 +290,35 @@
         <div class="od">即時合成，沒有外部音檔。第一次點畫面才會啟動。</div></div>
       <button class="sw serif" id="swSfx">開</button>
     </div>
-    <button class="go serif" id="btnOptsBack">回　去</button>
+    <div class="orow">
+      <div><div class="on2 serif">重看玩法說明</div>
+        <div class="od">把三種玩法的開場說明重新打開。</div></div>
+      <button class="sw serif" id="swIntro">重開</button>
+    </div>
+    <div class="modes">
+      <button class="go serif" id="btnGuide">說明書</button>
+      <button class="go serif" id="btnOptsBack">回　去</button>
+    </div>
+  </div>
+</div>
+
+<div class="veil" id="intro">
+  <div class="plate" style="max-width:560px">
+    <div class="lvl-head"><h2 class="serif" id="iTitle">玩　法</h2><small id="iSub">　</small></div>
+    <div id="iBody"></div>
+    <label class="chk"><input type="checkbox" id="iSkip"><span>下次不用再看</span></label>
+    <div class="modes">
+      <button class="go serif" id="btnIntroGo">起　筆</button>
+      <button class="go serif" id="btnIntroBack">回　去</button>
+    </div>
+  </div>
+</div>
+
+<div class="veil" id="guide">
+  <div class="plate" style="max-width:620px">
+    <div class="lvl-head"><h2 class="serif">說明書</h2><small>隨時可回來看</small></div>
+    <div id="gBody"></div>
+    <button class="go serif" id="btnGuideBack">回　去</button>
   </div>
 </div>
 
@@ -337,7 +374,7 @@
     <div class="stats">
       <div class="stat"><b id="sTime">0:00</b><span>撐住</span></div>
       <div class="stat"><b id="sKill">0</b><span>化開的墨</span></div>
-      <div class="stat"><b id="sLv">1</b><span>筆力</span></div>
+      <div class="stat"><b id="sLv">1</b><span id="sLvLab">筆力</span></div>
       <div class="stat"><b id="sGain">+0</b><span>筆意</span></div>
     </div>
     <div class="namebox" id="nameBox">
@@ -348,6 +385,7 @@
       <div class="tabs">
         <button class="tab on" data-mode="timed">五分鐘</button>
         <button class="tab" data-mode="endless">無　盡</button>
+        <button class="tab" data-mode="rpg">修　羅</button>
       </div>
       <div id="rows"></div>
       <p class="muted" id="boardMsg">讀取中…</p>
@@ -365,7 +403,7 @@
 (() => {
 "use strict";
 
-const VER = "v1.3";
+const VER = "v1.5";
 document.getElementById("verTag").textContent = VER;
 
 // ─────────────────────────── 畫布 ───────────────────────────
@@ -588,6 +626,8 @@ const UI = {
   rStrip: document.getElementById('rStrip'),
   rText: document.getElementById('rText'),
   rSub:  document.getElementById('rSub'),
+  intro: document.getElementById('intro'),
+  guide: document.getElementById('guide'),
   pause: document.getElementById('pause'),
   opts:  document.getElementById('opts'),
   mPts:  document.getElementById('mPts'),
@@ -600,16 +640,18 @@ const UI = {
   boardMsg:document.getElementById('boardMsg'),
   boardTitle: document.getElementById('boardTitle')
 };
-const VEILS = ['start','lvl','end','meta','pause','opts','codex','reel'];
+const VEILS = ['start','lvl','end','meta','pause','opts','codex','reel','intro','guide'];
 const showVeil = el => { for (const k of VEILS) UI[k].classList.toggle('on', UI[k] === el); };
 const hideVeils = () => { for (const k of VEILS) UI[k].classList.remove('on'); };
 
 let state = 'menu', paused = false;
 let p, enemies, bullets, foeShots, orbs, motes, novas, big, slashes, nums, bolts;
-let beams, pools, altars, altarT, packs, packT;
+let beams, pools, altars, altarT, packs, packT, loot, bossRank;
 let T, kills, spawnT, shake, shakeT, bossQueue, camX, camY;
 let pendingCards = [];
-let banner = null;
+let banner = null, flash = 0;
+// 每個提示都要說清楚「發生什麼」跟「實際數字」，不然玩家永遠不知道自己撿到什麼
+const say = (title, sub, col) => { banner = {title, sub, col:col || null, t:0}; };
 let MODE = 'timed';                       // 'timed' | 'endless'
 let nextBoss = 0, bossCount = 0;
 const GOAL = 300; // 五分鐘
@@ -721,21 +763,76 @@ const SIG = {
 
 // 地上的祭壇，走過去就吃到，效果持續整場
 const ALTARS = [
-  {name:'力　碑', apply:()=>p.dmgMul *= 1.12},
-  {name:'疾　碑', apply:()=>p.cdMul  *= 0.92},
-  {name:'韌　碑', apply:()=>{p.maxHp += 20; p.hp = Math.min(p.maxHp, p.hp + 40); healFx(true);}},
-  {name:'迅　碑', apply:()=>{ p.spd = Math.min(p.spd*1.06, p.spdBase*1.5); }},
-  {name:'悟　碑', apply:()=>{p.pending += 1;}}
+  {name:'力　碑', d:'這一場的傷害 +12%，效果持續到結束', apply:()=>p.dmgMul *= 1.12},
+  {name:'疾　碑', d:'這一場的出筆間隔 -8%，效果持續到結束', apply:()=>p.cdMul  *= 0.92},
+  {name:'韌　碑', d:'生命上限 +20 並回復 40', apply:()=>{p.maxHp += 20; p.hp = Math.min(p.maxHp, p.hp + 40); healFx(true);}},
+  {name:'迅　碑', d:'移動速度 +6%（有上限，最多到基礎的 1.5 倍）', apply:()=>{ p.spd = Math.min(p.spd*1.06, p.spdBase*1.5); }},
+  {name:'悟　碑', d:'立刻多添一筆', apply:()=>{p.pending += 1;}}
 ];
+
+// ─────────────────────────── 打寶 ───────────────────────────
+// 只有修羅模式會掉。撿到自動比較，比身上好才換，較差的就地分解成墨珠。
+const GEAR = {
+  blade: {ch:'刃', n:'刃', mk:t => ({dmg: 0.07 + t*0.055})},
+  armor: {ch:'甲', n:'甲', mk:t => ({hp: 14 + t*11, red: 0.02 + t*0.022})},
+  charm: {ch:'符', n:'符', mk:t => ({cd: 0.05 + t*0.032, pick: 0.10 + t*0.09})}
+};
+const GEAR_SLOTS = ['blade', 'armor', 'charm'];
+
+function rollItem(minTier){
+  let t = 0;
+  const x = Math.random();
+  if (x < 0.04) t = 3; else if (x < 0.18) t = 2; else if (x < 0.48) t = 1;
+  t = Math.max(t, minTier || 0);
+  const slot = GEAR_SLOTS[Math.random()*3|0];
+  const st = GEAR[slot].mk(t);
+  const jitter = 0.85 + Math.random()*0.3;
+  for (const k in st) st[k] = st[k]*jitter;
+  return {slot, t, st, score: t*1000 + Object.values(st).reduce((a,b)=>a+b,0)*100};
+}
+
+function applyGear(it, sign){
+  if (it.st.hp){ p.maxHp += sign*Math.round(it.st.hp); if (sign > 0) p.hp += Math.round(it.st.hp); }
+  if (it.st.pick) p.pick *= sign > 0 ? (1 + it.st.pick) : 1/(1 + it.st.pick);
+  p.hp = Math.min(p.hp, p.maxHp);
+}
+// 撿到就自動判斷，玩家在被追殺時沒空比較數值
+function takeItem(it){
+  const cur = p.gear[it.slot];
+  if (cur && cur.score >= it.score){
+    for (let i=0;i<3;i++){
+      const a = Math.random()*Math.PI*2;
+      orbs.push({x:p.x+Math.cos(a)*30, y:p.y+Math.sin(a)*30, v:2, vx:0, vy:0, t:0});
+    }
+    return false;
+  }
+  if (cur) applyGear(cur, -1);
+  p.gear[it.slot] = it;
+  applyGear(it, +1);
+  return true;
+}
+// 把裝備的數值翻成人話
+function gearText(it){
+  const st = it.st, out = [];
+  if (st.dmg)  out.push(`傷害 +${Math.round(st.dmg*100)}%`);
+  if (st.hp)   out.push(`生命上限 +${Math.round(st.hp)}`);
+  if (st.red)  out.push(`受到傷害 -${Math.round(st.red*100)}%`);
+  if (st.cd)   out.push(`出筆間隔 -${Math.round(st.cd*100)}%`);
+  if (st.pick) out.push(`拾取範圍 +${Math.round(st.pick*100)}%`);
+  return out.join('　');
+}
+const gearDmg = () => 1 + (p.gear.blade ? p.gear.blade.st.dmg : 0);
+const gearCd  = () => 1 - (p.gear.charm ? p.gear.charm.st.cd : 0);
+const gearRed = () => 1 - (p.gear.armor ? p.gear.armor.st.red : 0);
 
 // 地上散落的補包。跟祭壇不同：祭壇是整場的永久加成，補包是立即或短時效果。
 const PACKS = [
-  {id:'ink',   n:'墨　囊', col:'#5C7A4A', use:()=>{ p.hp = Math.min(p.maxHp, p.hp + p.maxHp*0.3); healFx(true); }},
-  {id:'rage',  n:'筆　囊', col:'#BF3B2D', use:()=>{ p.rage = Math.max(p.rage, 8); }},
-  {id:'quell', n:'鎮　紙', col:'#33526E', use:()=>{
+  {id:'ink',   n:'墨　囊', col:'#5C7A4A', d:'立刻回復三成生命', use:()=>{ p.hp = Math.min(p.maxHp, p.hp + p.maxHp*0.3); healFx(true); }},
+  {id:'rage',  n:'筆　囊', col:'#BF3B2D', d:'接下來 8 秒出筆速度加倍', use:()=>{ p.rage = Math.max(p.rage, 8); }},
+  {id:'quell', n:'鎮　紙', col:'#33526E', d:'原地炸開一圈，重創周圍所有的墨', use:()=>{
      novas.push({x:p.x, y:p.y, r:0, max:340, dmg:120*p.dmgMul, hit:new Set(), t:0});
      kick(20); SFX.play('slam'); }},
-  {id:'jade',  n:'墨　玉', col:'#B08A3E', use:()=>{
+  {id:'jade',  n:'墨　玉', col:'#B08A3E', d:'灑出一批墨珠，直接推進筆力', use:()=>{
      for (let i=0;i<14;i++){
        const a = Math.random()*Math.PI*2, d = 20 + Math.random()*60;
        orbs.push({x:p.x+Math.cos(a)*d, y:p.y+Math.sin(a)*d, v:2, vx:0, vy:0, t:0});
@@ -754,9 +851,12 @@ const COMBOS = [
 
 // ─────────────────────────── 場外修行 ───────────────────────────
 const OPTS_KEY = 'war-of-ink.opts.v1';
-let opts = {hpbar:true, dmgnum:true, sfx:true};
+let opts = {hpbar:true, dmgnum:true, sfx:true, intro:{timed:true, endless:true, rpg:true}};
 function loadOpts(){
   try { const r = localStorage.getItem(OPTS_KEY); if (r) opts = Object.assign(opts, JSON.parse(r)); } catch {}
+  if (!opts.intro || typeof opts.intro !== 'object') opts.intro = {};
+  for (const m of ['timed','endless','rpg'])
+    if (typeof opts.intro[m] !== 'boolean') opts.intro[m] = true;
 }
 function saveOpts(){ try { localStorage.setItem(OPTS_KEY, JSON.stringify(opts)); } catch {} }
 loadOpts();
@@ -826,13 +926,14 @@ function reset(){
     beam:0, beamT:0, pool:0, ward:0, wardT:0, wardUp:false,
     combo:{fen:false, shuang:false, lei:false},
     sig:'seal', sigT:0, sigN:0, rage:0, zeal:0, volley:0,
+    zeal2:0, stacks:0, peak:0, gear:{blade:null, armor:null, charm:null},
     bulletSpd:1, novaR:1, cards:3,
     cd:0, iframe:0, aim:-Math.PI/2, tilt:0,
     up:Object.fromEntries(UPGRADES.map(u=>[u.id,0]))
   };
   enemies=[]; bullets=[]; foeShots=[]; orbs=[]; motes=[]; novas=[]; big=[]; slashes=[];
   nums=[]; bolts=[]; beams=[]; pools=[]; altars=[]; packs=[];
-  altarT = 16; packT = 10;
+  altarT = 16; packT = 10; loot = []; bossRank = 0;
   // 專屬技能在這裡才套用，因為它會動到上面剛算好的數值
   p.sig = skinNow().id;
   const sg = SIG[p.sig];
@@ -843,9 +944,80 @@ function reset(){
   p.slamT = 0; p.landT = 0;
 }
 
-function begin(mode){ MODE = mode || MODE; reset(); hideVeils(); state='play'; }
-document.getElementById('btnStart').onclick   = () => begin('timed');
-document.getElementById('btnEndless').onclick = () => begin('endless');
+function begin(mode){
+  MODE = mode || MODE; reset(); hideVeils(); state = 'play';
+  const sg = SIG[p.sig];                       // 開局先報一次這場帶的專屬技能
+  if (sg) say(skinNow().n + '　' + sg.n, sg.d, C.jin);
+}
+// ─────────────────────────── 玩法說明 ───────────────────────────
+const sec = (h, p) => `<div class="sec"><h4 class="serif">${h}</h4><p>${p}</p></div>`;
+
+const MODE_INFO = {
+  timed: {t:'五分鐘', s:'標準玩法', body:
+    sec('目標', '撐過五分鐘就算贏，結算會顯示「留白」。時間到之前死了就是墨盡。') +
+    sec('怎麼打', '筆鋒會<b>自動朝最近的墨射擊</b>，你只要負責走位。用 WASD 或方向鍵，手機直接拖曳畫面。') +
+    sec('變強', '化開的墨會掉<b>墨珠</b>，撿滿一條就能<b>添筆</b>——從三張裡挑一張。挑什麼決定這一場的打法。') +
+    sec('墨王', '第 85、160、225、278 秒各來一隻墨王，四種輪流出場，血厚且會反擊。')},
+  endless: {t:'無盡', s:'沒有終點', body:
+    sec('目標', '沒有終點，撐越久越好。你的技能有上限，敵人沒有——<b>最後一定會輸</b>，比的是撐到第幾分鐘。') +
+    sec('難度', '敵人血量是<b>複利成長</b>：三分鐘 7 倍、八分鐘 14 倍、十三分鐘 34 倍。撞擊傷害也一起長。') +
+    sec('墨王', '每隔一段時間就來，間隔越來越短，後期一次來好幾隻。')},
+  rpg: {t:'修羅', s:'高風險高回報', body:
+    sec('銳氣', '每化開一隻墨 <b>+1 層</b>，每層傷害 +1.2%，沒有上限。100 層就是兩倍傷害。') +
+    sec('挨一下全沒', '只要<b>被打到一次</b>，銳氣全部歸零。不是死掉才清——所以這個模式是在賭你能不能一直不被碰到。') +
+    sec('打寶', '墨會掉裝備，分<b>刃</b>（傷害）、<b>甲</b>（生命與減傷）、<b>符</b>（攻速與拾取）三個欄位。撿到會自動跟身上的比，比較好才換，較差的就地分解成墨珠。') +
+    sec('墨王越戰越強', '每宰一隻，之後的墨王血量 +38%、撞擊 +22%、移速 +7%，登場時會標階級。') +
+    sec('計分', '排行榜比撐的時間，結算會另外記你這一場的<b>最高銳氣</b>。')}
+};
+
+let introMode = 'timed';
+function openIntro(m){
+  introMode = m;
+  const info = MODE_INFO[m];
+  document.getElementById('iTitle').textContent = info.t;
+  document.getElementById('iSub').textContent = info.s;
+  document.getElementById('iBody').innerHTML = info.body;
+  document.getElementById('iSkip').checked = !opts.intro[m];
+  showVeil(UI.intro);
+}
+function startMode(m){
+  SFX.unlock();
+  if (opts.intro[m]) openIntro(m); else begin(m);
+}
+document.getElementById('btnStart').onclick   = () => startMode('timed');
+document.getElementById('btnEndless').onclick = () => startMode('endless');
+document.getElementById('btnRpg').onclick     = () => startMode('rpg');
+document.getElementById('iSkip').onchange = e => {
+  opts.intro[introMode] = !e.target.checked; saveOpts();
+};
+document.getElementById('btnIntroGo').onclick   = () => begin(introMode);
+document.getElementById('btnIntroBack').onclick = () => showVeil(UI.start);
+
+// 完整說明書
+function openGuide(){
+  document.getElementById('gBody').innerHTML =
+    sec('操作', 'WASD 或方向鍵移動，手機直接拖曳畫面。筆鋒自動射擊，Esc 或 P 叫出暫停選單。添筆時按 1 2 3 選卡，按 R 重抽。') +
+    sec('三種玩法',
+      '<b>五分鐘</b>：撐過 300 秒就贏。<br>' +
+      '<b>無盡</b>：沒有終點，撐越久越好，最後一定會輸。<br>' +
+      '<b>修羅</b>：殺敵累積銳氣加傷害，挨一下全部歸零，另外會掉裝備。') +
+    sec('添筆與合筆',
+      '每次升級從三張裡挑一張，共 16 種。兩門特定技能都練滿時會跳出<b>金色的合筆卡</b>，是當下唯一選項：<br>' +
+      '焚墨 = 焦墨 + 潑墨　·　霜刃 = 凍硯 + 迴筆　·　貫雷 = 驚電 + 透紙') +
+    sec('地上的東西',
+      '<b>祭壇</b>（金色方框）：整場的永久加成，力/疾/韌/迅/悟五種。<br>' +
+      '<b>補包</b>（小袋子）：立即或短時效果，墨囊回血、筆囊加速、鎮紙轟擊、墨玉灑墨珠。30 秒沒撿會消失。<br>' +
+      '<b>裝備</b>（菱形，僅修羅）：撿到自動比較，好才換。') +
+    sec('筆意與印譜',
+      '每場結束換<b>筆意</b>：每 12 隻 1 點、每 30 秒 1 點、五分鐘撐到底再加 15。<br>' +
+      '筆意可以在<b>修行</b>買永久加點（所有武將通用），或在<b>印譜</b>抽三國名將。') +
+    sec('武將與專屬技能',
+      '每位武將有本命兵器和一個專屬技能，設計成<b>同強度、不同風格</b>——稀有度決定的是特殊程度，不是數值高低。點印譜裡的格子可以看該武將的技能說明。') +
+    sec('主角專屬 · 朱批',
+      '硃砂印每化開 25 隻墨，下一次出筆化為<b>貫穿全場的金色巨筆</b>，十二倍傷害、把整排轟開並點燃。左上角的金色圓環就是它的蓄力進度。');
+  showVeil(UI.guide);
+}
+document.getElementById('btnGuideBack').onclick = () => showVeil(UI.opts);
 document.getElementById('btnAgain').onclick   = () => begin();
 
 // ─────────────────────────── 敵人 ───────────────────────────
@@ -871,11 +1043,13 @@ const BOSS_NAME = {
 // 無盡模式後段改成複利，不然玩家的乘算成長會直接輾過線性的敵人
 function hpScale(){
   const lin = 1 + T*0.011;
-  return MODE === 'endless' ? lin * Math.pow(1.05, T/30) : lin;
+  if (MODE === 'endless') return lin * Math.pow(1.05, T/30);
+  if (MODE === 'rpg')     return lin * Math.pow(1.05, T/38);
+  return lin;
 }
 // 撞擊傷害也要跟著長，不然後期敵人只是肉盾
 function dmgScale(){
-  return MODE === 'endless' ? 1 + T/300 : 1;
+  return MODE === 'timed' ? 1 : 1 + T/320;
 }
 
 function makeLobes(n){
@@ -903,7 +1077,16 @@ function spawnEnemy(kind){
     kx:0, ky:0, bk: t.boss || null,
     chT: 1.6, phase: 'wind', dvx: 0, dvy: 0, sumT: 2.0
   };
-  if (e.boss){ e.hp = e.maxHp = t.hp*hpScale()*0.85; big.push(e); }
+  if (e.boss){
+    // 修羅模式：每宰一隻墨王，之後的墨王就更硬更兇更快
+    const rk = MODE === 'rpg' ? bossRank : 0;
+    e.rank = rk;
+    e.hp = e.maxHp = t.hp*hpScale()*0.85*(1 + rk*0.38);
+    e.dmg *= 1 + rk*0.22;
+    e.spd *= 1 + rk*0.07;
+    if (e.shoot) e.shoot = Math.max(0.5, e.shoot*(1 - rk*0.07));
+    big.push(e);
+  }
   enemies.push(e);
   return e;
 }
@@ -1140,12 +1323,42 @@ function choose(u){
   else { hideVeils(); state = 'play'; }
 }
 
+// 朱批：主角專屬。不是一發子彈，是一整道貫穿全場的巨筆。
+function edict(dm){
+  const a = p.aim, len = 1400;
+  const ex = p.x + Math.cos(a)*len, ey = p.y + Math.sin(a)*len;
+  let hits = 0;
+  for (const e of enemies){
+    if (segDist(e.x, e.y, p.x, p.y, ex, ey) < e.r + 40){
+      hurt(e, 14*dm*12, Math.cos(a), Math.sin(a));
+      e.kx += Math.cos(a)*260; e.ky += Math.sin(a)*260;   // 整排轟開
+      e.burn = 3; e.burnDps = 18*p.dmgMul;
+      hits++;
+    }
+  }
+  beams.push({x:p.x, y:p.y, a, len, t:0, gold:true});
+  for (let i=0;i<48;i++){
+    const q = Math.random(), off = (Math.random()-0.5)*70;
+    motes.push({x:p.x + Math.cos(a)*len*q - Math.sin(a)*off,
+                y:p.y + Math.sin(a)*len*q + Math.cos(a)*off,
+                vx:Math.cos(a)*(60+Math.random()*220), vy:Math.sin(a)*(60+Math.random()*220),
+                r:1.5+Math.random()*3.5, life:0.6+Math.random()*0.4, t:0, col:C.jin});
+  }
+  flash = 0.32;
+  kick(30);
+  SFX.play('slam'); SFX.play('bolt');
+  say('朱　批', `貫穿全場　十二倍傷害　掃中 ${hits} 隻`, C.jin);
+  p.cd = 0.72 * p.cdMul * gearCd();
+  weaponFx();
+}
+
 // 出一輪筆。專屬技能都在這裡改寫這一輪的內容。
 function fire(mv){
-  p.cd = 0.72 * p.cdMul * (p.rage > 0 ? 0.5 : 1);
+  p.cd = 0.72 * p.cdMul * gearCd() * (p.rage > 0 ? 0.5 : 1);
   p.volley++;
 
-  let dm = p.dmgMul, spd = 570 * p.bulletSpd, life = 1.1 * p.bulletSpd;
+  let dm = p.dmgMul * gearDmg() * (1 + p.stacks*0.012);
+  let spd = 570 * p.bulletSpd, life = 1.1 * p.bulletSpd;
   let shots = p.shots, pierce = p.pierce, r = 6;
 
   if (p.sig === 'zhangliao')                       // 突陣：動起來才有威力
@@ -1156,9 +1369,10 @@ function fire(mv){
   if (p.sig === 'weiyan' && p.sigT <= 0){          // 奇襲
     p.sigT = 7; dm *= 3; special = 'crit';
   }
-  if (p.sig === 'seal' && p.sigN >= 25){           // 朱批：主角專屬
-    p.sigN = 0; special = 'edict';
-    shots = 1; dm *= 4.5; pierce = 99; r = 13; spd *= 1.25; life *= 2.2;
+  if (p.sig === 'seal' && p.sigN >= 25){           // 朱批：主角專屬，直接橫掃全場
+    p.sigN = 0;
+    edict(dm);
+    return;
   }
   if (p.sig === 'guanyu' && p.volley % 5 === 0){   // 青龍：第五輪的月刃
     special = 'crescent';
@@ -1207,13 +1421,26 @@ function update(dt){
   if (MODE === 'timed'){
     if (bossQueue.length && T >= bossQueue[0]){ bossQueue.shift(); due = 1; }
   } else if (T >= nextBoss){
-    nextBoss = T + Math.max(38, 78 - bossCount*5);
-    due = 1 + Math.floor(bossCount / 6);        // 越後面一次來越多隻
+    if (MODE === 'rpg'){
+      nextBoss = T + Math.max(30, 58 - bossCount*3);
+      due = 1;                                   // 修羅一次只來一隻，但一隻比一隻強
+    } else {
+      nextBoss = T + Math.max(38, 78 - bossCount*5);
+      due = 1 + Math.floor(bossCount / 6);       // 越後面一次來越多隻
+    }
   }
   for (let i=0;i<due;i++){
     const bk = BOSS_KINDS[bossCount++ % BOSS_KINDS.length];
     spawnEnemy('boss_' + bk);
-    if (i === 0){ kick(18); SFX.play('boss'); banner = {text: BOSS_NAME[bk], t:0}; }
+    if (i === 0){
+      kick(18); SFX.play('boss');
+      const RK = ['', '　二階', '　三階', '　四階', '　五階'];
+      const rkTxt = MODE === 'rpg' && bossRank ? (RK[bossRank] || `　${bossRank+1}階`) : '';
+      say(BOSS_NAME[bk] + rkTxt,
+          MODE === 'rpg' && bossRank
+            ? `第 ${bossRank+1} 隻墨王　血量與撞擊都比上一隻更高`
+            : '墨王登場　打倒它會掉大量墨珠');
+    }
   }
 
   // 自動出筆
@@ -1336,7 +1563,7 @@ function update(dt){
     if ((al.x-p.x)**2 + (al.y-p.y)**2 < (p.r+26)**2){
       al.k.apply();
       SFX.play('altar');
-      banner = {text: al.k.name, t:0};
+      say(al.k.name, al.k.d, C.jin);
       splat(al.x, al.y, 26, C.jin, 200);
       kick(10);
       altars.splice(i,1);
@@ -1363,6 +1590,24 @@ function update(dt){
     }
   }
 
+  // 掉落的裝備
+  for (let i=loot.length-1;i>=0;i--){
+    const lt = loot[i];
+    lt.t += dt;
+    if (lt.t > 40 || Math.hypot(lt.x-p.x, lt.y-p.y) > 2200){ loot.splice(i,1); continue; }
+    const dx = p.x-lt.x, dy = p.y-lt.y, d = Math.hypot(dx,dy) || 1;
+    if (d < p.pick*0.8){ lt.x += (dx/d)*180*dt; lt.y += (dy/d)*180*dt; }
+    if (d < p.r + 18){
+      const better = takeItem(lt.it);
+      say((better ? '換上　' : '分解　') + RARITY[lt.it.t].n + '　' + GEAR[lt.it.slot].n,
+          better ? gearText(lt.it) : '身上那件更好，化成墨珠',
+          RARITY[lt.it.t].col);
+      splat(lt.x, lt.y, better ? 20 : 8, RARITY[lt.it.t].col, 160);
+      SFX.play(better ? 'altar' : 'gem');
+      loot.splice(i,1);
+    }
+  }
+
   // 補包：比祭壇密，效果是立即或短時的
   packT -= dt;
   if (packT <= 0 && packs.length < 5){
@@ -1377,7 +1622,7 @@ function update(dt){
     if (pk.t > 30 || Math.hypot(pk.x-p.x, pk.y-p.y) > 2200){ packs.splice(i,1); continue; }
     if ((pk.x-p.x)**2 + (pk.y-p.y)**2 < (p.r+22)**2){
       pk.k.use();
-      banner = {text: pk.k.n, t:0};
+      say(pk.k.n, pk.k.d, pk.k.col);
       splat(pk.x, pk.y, 18, pk.k.col, 170);
       SFX.play('gem');
       packs.splice(i,1);
@@ -1545,6 +1790,14 @@ function update(dt){
     if (e.hp <= 0){
       kills++;
       p.sigN++;
+      if (MODE === 'rpg'){
+        p.stacks++;
+        if (p.stacks > p.peak) p.peak = p.stacks;
+        // 打寶：只有修羅掉，墨王必掉且至少珍階
+        const drop = e.boss ? 1 : (Math.random() < 0.014 ? 1 : 0);
+        if (drop && loot.length < 26)
+          loot.push({x:e.x, y:e.y, it:rollItem(e.boss ? 2 : 0), t:0});
+      }
       if (p.sig === 'diaochan' && Math.random() < 0.14){        // 離間
         for (const o of enemies) if (!o.boss &&
           (o.x-e.x)**2 + (o.y-e.y)**2 < 150*150) o.chill = 2;
@@ -1567,7 +1820,11 @@ function update(dt){
           m.x = e.x + Math.cos(a)*34; m.y = e.y + Math.sin(a)*34;
         }
       }
-      if (e.boss){ kick(22); const bi = big.indexOf(e); if (bi>=0) big.splice(bi,1); }
+      if (e.boss){
+        kick(22);
+        const bi = big.indexOf(e); if (bi>=0) big.splice(bi,1);
+        if (MODE === 'rpg') bossRank++;
+      }
       enemies.splice(i,1);
     }
   }
@@ -1624,7 +1881,8 @@ function update(dt){
     if (m.t >= m.life) motes.splice(i,1);
   }
 
-  if (banner){ banner.t += dt; if (banner.t > 2.2) banner = null; }
+  if (banner){ banner.t += dt; if (banner.t > 2.6) banner = null; }
+  if (flash > 0) flash -= dt;
 
   // 鏡頭
   camX += (p.x - camX) * Math.min(1, dt*6);
@@ -1644,6 +1902,7 @@ function hurt(e, dmg, kx, ky, dot){
 
 function damagePlayer(dmg){
   if (state !== 'play') return;
+  dmg *= gearRed();
   if (p.wardUp){                            // 紙甲擋掉這一下
     p.wardUp = false;
     p.wardT = Math.max(5, 14 - p.ward*2);
@@ -1656,6 +1915,12 @@ function damagePlayer(dmg){
   p.iframe = 0.85 + p.guard;
   kick(11);
   splat(p.x, p.y, 12, C.zhu, 150);
+  if (MODE === 'rpg' && p.stacks){        // 修羅：挨一下，銳氣全部散掉
+    say('銳氣散盡', `挨了一下，累積的 ${p.stacks} 層（傷害 +${Math.round(p.stacks*1.2)}%）全部歸零`, C.ink);
+    p.stacks = 0;
+    splat(p.x, p.y, 30, C.ink, 240);
+    kick(16);
+  }
   if (p.sig === 'xiahoudun') p.hp = Math.min(p.maxHp, p.hp + dmg*0.28);  // 拔矢
   if (p.sig === 'zhaoyun') p.zeal = 2.5;                                 // 七進七出
   SFX.play('hurt');
@@ -1711,6 +1976,12 @@ document.getElementById('btnPauseOpts').onclick = openOpts('pause');
 document.getElementById('btnOptsBack').onclick  = () => {
   showVeil(optsFrom === 'pause' ? UI.pause : UI.start);
 };
+document.getElementById('btnGuide').onclick = openGuide;
+document.getElementById('swIntro').onclick = () => {
+  for (const m of ['timed','endless','rpg']) opts.intro[m] = true;
+  saveOpts();
+  document.getElementById('swIntro').textContent = '已重開';
+};
 
 // 一場打完換多少筆意
 function runReward(){
@@ -1726,7 +1997,8 @@ function finish(won){
   UI.verdict.className = 'verdict serif ' + (won ? 'win' : 'lose');
   UI.sTime.textContent = fmt(MODE === 'timed' ? Math.min(T, GOAL) : T);
   UI.sKill.textContent = kills;
-  UI.sLv.textContent = p.lv;
+  UI.sLv.textContent = MODE === 'rpg' ? p.peak : p.lv;
+  document.getElementById('sLvLab').textContent = MODE === 'rpg' ? '最高銳氣' : '筆力';
   const gain = runReward();
   meta.pts += gain; meta.runs = (meta.runs||0) + 1; saveMeta();
   UI.sGain.textContent = '+' + gain;
@@ -2149,9 +2421,9 @@ function draw(){
 
   // 墨龍
   for (const bm of beams){
-    const k = Math.max(0, 1 - bm.t/0.4);
+    const k = Math.max(0, 1 - bm.t/(bm.gold ? 0.55 : 0.4));
     const ca = Math.cos(bm.a), sa = Math.sin(bm.a), nx = -sa, ny = ca;
-    const w = 15*k + 3;
+    const w = (bm.gold ? 42 : 15)*k + 3;
     ctx.beginPath();
     ctx.moveTo(bm.x + nx*w, bm.y + ny*w);
     ctx.quadraticCurveTo(bm.x + ca*bm.len*0.5 + nx*w*1.6, bm.y + sa*bm.len*0.5 + ny*w*1.6,
@@ -2159,7 +2431,16 @@ function draw(){
     ctx.quadraticCurveTo(bm.x + ca*bm.len*0.5 - nx*w*1.6, bm.y + sa*bm.len*0.5 - ny*w*1.6,
                          bm.x - nx*w, bm.y - ny*w);
     ctx.closePath();
-    ctx.fillStyle = C.ink; ctx.globalAlpha = k*0.8; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.fillStyle = bm.gold ? C.jin : C.ink;
+    ctx.globalAlpha = k*(bm.gold ? 0.9 : 0.8); ctx.fill();
+    if (bm.gold){
+      ctx.strokeStyle = C.zhu; ctx.lineWidth = 6*k + 1; ctx.globalAlpha = k*0.75;
+      ctx.beginPath();
+      ctx.moveTo(bm.x, bm.y);
+      ctx.lineTo(bm.x + Math.cos(bm.a)*bm.len, bm.y + Math.sin(bm.a)*bm.len);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
   }
 
   // 驚電
@@ -2172,6 +2453,27 @@ function draw(){
     ctx.strokeStyle = C.dian; ctx.globalAlpha = k*0.28; ctx.lineWidth = 9*k; ctx.stroke();
     ctx.globalAlpha = k*0.95; ctx.lineWidth = 2.6*k + 0.6; ctx.stroke();
     ctx.globalAlpha = 1;
+  }
+
+  // 掉落的裝備
+  for (const lt of loot){
+    const fade = lt.t > 34 ? (40 - lt.t)/6 : 1;
+    ctx.save(); ctx.translate(lt.x, lt.y + Math.sin(lt.t*3)*2.5);
+    ctx.globalAlpha = fade;
+    ctx.rotate(Math.PI/4);
+    ctx.fillStyle = RARITY[lt.it.t].col;
+    rrect(-9, -9, 18, 18, 3); ctx.fill();
+    ctx.rotate(-Math.PI/4);
+    ctx.fillStyle = '#F4EFE2';
+    ctx.font = '800 11px "Noto Serif TC","Songti TC",serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(GEAR[lt.it.slot].ch, 0, 1);
+    if (lt.it.t >= 2){
+      ctx.globalAlpha = fade * Math.max(0, 0.5 - (lt.t % 1.4)/2.8);
+      ctx.beginPath(); ctx.arc(0, 0, 13 + (lt.t % 1.4)*20, 0, Math.PI*2);
+      ctx.strokeStyle = RARITY[lt.it.t].col; ctx.lineWidth = 2; ctx.stroke();
+    }
+    ctx.restore(); ctx.globalAlpha = 1;
   }
 
   // 補包
@@ -2314,6 +2616,14 @@ function draw(){
   }
 
   ctx.restore();
+
+  if (flash > 0){
+    ctx.fillStyle = '#F7F1E0';
+    ctx.globalAlpha = Math.min(0.75, flash*2.2);
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+
   drawHUD();
 }
 
@@ -2483,7 +2793,15 @@ function drawHUD(){
   ctx.globalAlpha = 1;
 
   // 技能盤：所有學到的技能都列出來，有冷卻的畫進度環，被動的畫等級點
+  const SIGSLOT = {
+    seal:      {ch:'批', cd:()=>Math.max(0, 25 - p.sigN), max:()=>25},
+    weiyan:    {ch:'襲', cd:()=>Math.max(0, p.sigT), max:()=>7},
+    ganning:   {ch:'帆', cd:()=>p.wardUp ? 0 : Math.max(0, p.sigT), max:()=>26},
+    zhugeliang:{ch:'陣', cd:()=>Math.max(0, p.sigT), max:()=>11}
+  };
   const SLOTS = [
+    ...(SIGSLOT[p.sig] ? [{have:()=>1, sig:true, ch:SIGSLOT[p.sig].ch,
+        cd:SIGSLOT[p.sig].cd, max:SIGSLOT[p.sig].max, lv:()=>0}] : []),
     {have:()=>p.nova,  ch:'潑', cd:()=>p.slamT > 0 ? 0 : Math.max(0, p.novaT), max:novaCd, lv:()=>p.up.nova},
     {have:()=>p.bolt,  ch:'電', cd:()=>Math.max(0, p.boltT), max:()=>Math.max(1.1, 3.2 - p.bolt*0.45), lv:()=>p.up.bolt},
     {have:()=>p.beam,  ch:'龍', cd:()=>Math.max(0, p.beamT), max:()=>Math.max(2.2, 5.5 - p.beam*0.8), lv:()=>p.up.beam},
@@ -2516,7 +2834,7 @@ function drawHUD(){
     }
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = '700 14px "Noto Serif TC","Songti TC",serif';
-    ctx.fillStyle = (timed && !ready) ? 'rgba(27,26,23,.45)' : C.ink;
+    ctx.fillStyle = (timed && !ready) ? 'rgba(27,26,23,.45)' : (sl.sig ? C.jin : C.ink);
     ctx.fillText(sl.ch, cx, cy + 1);
     const n = sl.lv();                       // 等級點
     for (let k=0;k<n;k++){
@@ -2526,6 +2844,30 @@ function drawHUD(){
     }
   });
 
+  // 修羅：銳氣層數與身上的三件裝備
+  if (MODE === 'rpg'){
+    const gy = pad + 100;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.font = '800 22px "Noto Serif TC","Songti TC",serif';
+    ctx.fillStyle = p.stacks ? C.zhu : 'rgba(27,26,23,.35)';
+    ctx.fillText(p.stacks, pad, gy);
+    const wide = ctx.measureText(p.stacks).width;
+    ctx.font = '600 11px system-ui,sans-serif';
+    ctx.globalAlpha = .6; ctx.fillStyle = C.ink;
+    ctx.fillText(`銳氣　傷害 +${Math.round(p.stacks*1.2)}%`, pad + wide + 8, gy + 1);
+    ctx.globalAlpha = 1;
+    GEAR_SLOTS.forEach((sl, i) => {
+      const it = p.gear[sl], bx = pad + i*30, by = gy + 16;
+      ctx.beginPath(); rrect(bx, by, 25, 25, 4);
+      if (it){ ctx.fillStyle = RARITY[it.t].col; ctx.fill(); }
+      else { ctx.strokeStyle = 'rgba(27,26,23,.22)'; ctx.lineWidth = 1.5; ctx.stroke(); }
+      ctx.font = '700 12px "Noto Serif TC","Songti TC",serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = it ? '#F4EFE2' : 'rgba(27,26,23,.28)';
+      ctx.fillText(GEAR[sl].ch, bx + 12.5, by + 13);
+    });
+  }
+
   // 倒數
   ctx.font = '800 30px "Noto Serif TC","Songti TC",serif';
   ctx.textAlign = 'right'; ctx.textBaseline = 'top';
@@ -2533,19 +2875,25 @@ function drawHUD(){
   ctx.fillText(MODE === 'timed' ? fmt(Math.max(0, GOAL - T)) : fmt(T), W - pad, pad - 2);
   ctx.font = '600 11px system-ui,sans-serif';
   ctx.globalAlpha = .55;
-  ctx.fillText(MODE === 'timed' ? '剩餘' : '無盡', W - pad, pad + 34);
+  ctx.fillText(MODE === 'timed' ? '剩餘' : MODE === 'rpg' ? '修羅' : '無盡', W - pad, pad + 34);
   ctx.globalAlpha = 1;
 
   if (banner){
-    const k = banner.t < 0.3 ? banner.t/0.3 : Math.max(0, 1 - (banner.t-0.3)/1.9);
+    const k = banner.t < 0.3 ? banner.t/0.3 : Math.max(0, 1 - (banner.t-0.3)/2.3);
+    const cy = H*0.22;
     ctx.save();
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.globalAlpha = k;
-    ctx.fillStyle = C.ink;
-    ctx.font = '900 clamp(34px, 9vw, 58px) "Noto Serif TC","Songti TC",serif';
-    ctx.fillText(banner.text, W/2, H*0.24);
-    ctx.fillStyle = C.zhu;
-    ctx.fillRect(W/2 - 44, H*0.24 + 40, 88, 3);
+    ctx.fillStyle = banner.col || C.ink;
+    ctx.font = '900 clamp(30px, 8vw, 52px) "Noto Serif TC","Songti TC",serif';
+    ctx.fillText(banner.title, W/2, cy);
+    ctx.fillStyle = banner.col || C.zhu;
+    ctx.fillRect(W/2 - 40, cy + 34, 80, 3);
+    if (banner.sub){                       // 第二行說明它到底做了什麼
+      ctx.fillStyle = C.ink; ctx.globalAlpha = k*0.75;
+      ctx.font = '600 clamp(12px, 3.2vw, 15px) system-ui,sans-serif';
+      ctx.fillText(banner.sub, W/2, cy + 54);
+    }
     ctx.restore();
     ctx.globalAlpha = 1;
   }
