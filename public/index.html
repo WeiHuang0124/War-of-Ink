@@ -208,6 +208,12 @@
   .rchip.new{border-color:var(--zhu);color:var(--zhu);font-weight:700}
   .gw{font-size:10px;color:var(--ink-soft);letter-spacing:.04em;margin-top:1px}
   .gsash{font-size:10px;color:var(--jin);letter-spacing:.1em;height:12px}
+  .seedin{
+    border:2px solid var(--ink);background:transparent;padding:9px 10px;width:104px;
+    font:inherit;font-size:16px;font-weight:700;letter-spacing:.16em;text-align:center;
+    color:var(--ink);text-transform:uppercase;border-radius:0;
+  }
+  .seedin:focus{outline:none;border-color:var(--zhu)}
   .chk{display:flex;align-items:center;gap:9px;margin-top:16px;font-size:13px;
        color:var(--ink-soft);cursor:pointer;letter-spacing:.06em}
   .chk input{width:18px;height:18px;accent-color:var(--zhu);cursor:pointer}
@@ -306,6 +312,11 @@
   <div class="plate" style="max-width:560px">
     <div class="lvl-head"><h2 class="serif" id="iTitle">玩　法</h2><small id="iSub">　</small></div>
     <div id="iBody"></div>
+    <div class="orow" style="border-bottom:none">
+      <div><div class="on2 serif">種子</div>
+        <div class="od">留空＝隨機。填入同一組六碼，兩個人就會遇到<b>完全一樣</b>的波次、祭壇與墨王順序，可以直接比高下。</div></div>
+      <input id="iSeed" class="seedin" maxlength="6" placeholder="隨機" autocomplete="off" spellcheck="false">
+    </div>
     <label class="chk"><input type="checkbox" id="iSkip"><span>下次不用再看</span></label>
     <div class="modes">
       <button class="go serif" id="btnIntroGo">起　筆</button>
@@ -376,6 +387,7 @@
       <div class="stat"><b id="sKill">0</b><span>化開的墨</span></div>
       <div class="stat"><b id="sLv">1</b><span id="sLvLab">筆力</span></div>
       <div class="stat"><b id="sGain">+0</b><span>筆意</span></div>
+      <div class="stat"><b id="sSeed">—</b><span>種子</span></div>
     </div>
     <div class="namebox" id="nameBox">
       <input id="nameIn" maxlength="8" placeholder="留個名號" autocomplete="off" spellcheck="false">
@@ -403,7 +415,7 @@
 (() => {
 "use strict";
 
-const VER = "v1.5";
+const VER = "v1.6";
 document.getElementById("verTag").textContent = VER;
 
 // ─────────────────────────── 畫布 ───────────────────────────
@@ -934,6 +946,10 @@ function reset(){
   enemies=[]; bullets=[]; foeShots=[]; orbs=[]; motes=[]; novas=[]; big=[]; slashes=[];
   nums=[]; bolts=[]; beams=[]; pools=[]; altars=[]; packs=[];
   altarT = 16; packT = 10; loot = []; bossRank = 0;
+  seed = nextSeed === null ? newSeed() : nextSeed;
+  nextSeed = null;
+  wrN = 0; wrSum = 0;
+  wr = worldRng(seed);
   // 專屬技能在這裡才套用，因為它會動到上面剛算好的數值
   p.sig = skinNow().id;
   const sg = SIG[p.sig];
@@ -990,7 +1006,12 @@ document.getElementById('btnRpg').onclick     = () => startMode('rpg');
 document.getElementById('iSkip').onchange = e => {
   opts.intro[introMode] = !e.target.checked; saveOpts();
 };
-document.getElementById('btnIntroGo').onclick   = () => begin(introMode);
+document.getElementById('btnIntroGo').onclick = () => {
+  const raw = (document.getElementById('iSeed').value || '').trim().toUpperCase();
+  const n = raw ? parseInt(raw, 36) : NaN;
+  nextSeed = Number.isFinite(n) && n > 0 ? (n % 0x7FFFFFFF) : null;
+  begin(introMode);
+};
 document.getElementById('btnIntroBack').onclick = () => showVeil(UI.start);
 
 // 完整說明書
@@ -1019,6 +1040,30 @@ function openGuide(){
 }
 document.getElementById('btnGuideBack').onclick = () => showVeil(UI.opts);
 document.getElementById('btnAgain').onclick   = () => begin();
+
+// ─────────────────────────── 世界亂數 ───────────────────────────
+// 同種子的兩個人要看到一模一樣的波次，所以「世界」有自己的亂數流。
+// 鐵則：這條流只能被『計時器驅動』的事件消耗，絕不能被玩家行為消耗——
+// 否則兩人打法不同就會分歧。粒子、特效那些照舊用 Math.random()。
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+let seed = 0, wr = Math.random, nextSeed = null;
+// 消耗次數與累計值。兩個玩家在同一秒的這兩個數字必須完全相同，
+// 這是「同種子＝同世界」的不變量，測試直接驗它。
+let wrN = 0, wrSum = 0;
+function worldRng(sd){
+  const f = mulberry32(sd);
+  return () => { const v = f(); wrN++; wrSum = (wrSum + v) % 1e6; return v; };
+}
+const newSeed = () => (Math.random()*0x7FFFFFFF) | 0;
+// 種子顯示成六位英數，方便口頭念給對手
+const seedCode = n => (n >>> 0).toString(36).toUpperCase().padStart(6, '0').slice(-6);
 
 // ─────────────────────────── 敵人 ───────────────────────────
 const TYPES = {
@@ -1063,18 +1108,23 @@ function makeLobes(n){
   return a;
 }
 
-function spawnEnemy(kind){
+// R 傳入世界亂數流時，這隻敵人的位置與速度就是可重現的
+function spawnEnemy(kind, at, R){
+  R = R || Math.random;
   const t = TYPES[kind];
-  const ang = Math.random()*Math.PI*2;
+  const ang = R()*Math.PI*2;
   const dist = Math.hypot(W,H)/2 + 90;
   const scale = hpScale();
   const e = {
-    kind, x: p.x + Math.cos(ang)*dist, y: p.y + Math.sin(ang)*dist,
-    r: t.r, hp: t.hp*scale, maxHp: t.hp*scale, spd: t.spd*(0.9+Math.random()*0.2),
+    kind,
+    x: at ? at.x : p.x + Math.cos(ang)*dist,
+    y: at ? at.y : p.y + Math.sin(ang)*dist,
+    r: t.r, hp: t.hp*scale, maxHp: t.hp*scale, spd: t.spd*(0.9+R()*0.2),
     dmg: t.dmg*dmgScale(), xp: t.xp, col: t.col, boss: !!t.boss,
     lobes: makeLobes(t.lobes), flash:0, wob: Math.random()*10,
     shootT: t.shoot ? Math.random()*t.shoot : 0, shoot: t.shoot||0,
     kx:0, ky:0, bk: t.boss || null,
+    world: R === wr,        // 由世界亂數生成＝兩邊一定一樣；墨王召喚出來的則否
     chT: 1.6, phase: 'wind', dvx: 0, dvy: 0, sumT: 2.0
   };
   if (e.boss){
@@ -1091,8 +1141,8 @@ function spawnEnemy(kind){
   return e;
 }
 
-function pickKind(){
-  const r = Math.random();
+function pickKind(R){
+  const r = (R || Math.random)();
   if (T > 130 && r < 0.14) return 'nib';
   if (T > 70  && r < 0.26) return 'slab';
   if (T > 25  && r < 0.46) return 'spray';
@@ -1412,10 +1462,16 @@ function update(dt){
 
   // 生成
   spawnT -= dt;
-  if (spawnT <= 0 && enemies.length < 210){
+  if (spawnT <= 0){
     spawnT = Math.max(0.38, 0.92 - T*0.0018);
     const n = 1 + Math.floor(T/95);
-    for (let i=0;i<n;i++) spawnEnemy(pickKind());
+    const room = enemies.length < 210;
+    for (let i=0;i<n;i++){
+      // 上限擋下時也要照抽，不然兩邊的亂數流會錯開
+      const kind = pickKind(wr);
+      if (room) spawnEnemy(kind, null, wr);
+      else { wr(); wr(); }                       // 補掉 spawnEnemy 會用掉的兩次
+    }
   }
   let due = 0;
   if (MODE === 'timed'){
@@ -1431,7 +1487,7 @@ function update(dt){
   }
   for (let i=0;i<due;i++){
     const bk = BOSS_KINDS[bossCount++ % BOSS_KINDS.length];
-    spawnEnemy('boss_' + bk);
+    spawnEnemy('boss_' + bk, null, wr);
     if (i === 0){
       kick(18); SFX.play('boss');
       const RK = ['', '　二階', '　三階', '　四階', '　五階'];
@@ -1550,11 +1606,11 @@ function update(dt){
 
   // 祭壇：定時在遠處生一座，走過去就吃到
   altarT -= dt;
-  if (altarT <= 0 && altars.length < 3){
+  if (altarT <= 0){
     altarT = 22;
-    const a = Math.random()*Math.PI*2, d = 480 + Math.random()*420;
-    const k = ALTARS[Math.random()*ALTARS.length|0];
-    altars.push({x:p.x+Math.cos(a)*d, y:p.y+Math.sin(a)*d, k, t:0});
+    const a = wr()*Math.PI*2, d = 480 + wr()*420;
+    const k = ALTARS[wr()*ALTARS.length|0];
+    if (altars.length < 3) altars.push({x:p.x+Math.cos(a)*d, y:p.y+Math.sin(a)*d, k, t:0});
   }
   for (let i=altars.length-1;i>=0;i--){
     const al = altars[i];
@@ -1610,11 +1666,11 @@ function update(dt){
 
   // 補包：比祭壇密，效果是立即或短時的
   packT -= dt;
-  if (packT <= 0 && packs.length < 5){
+  if (packT <= 0){
     packT = 13;
-    const a = Math.random()*Math.PI*2, d = 300 + Math.random()*480;
-    packs.push({x:p.x+Math.cos(a)*d, y:p.y+Math.sin(a)*d,
-                k:PACKS[Math.random()*PACKS.length|0], t:0});
+    const a = wr()*Math.PI*2, d = 300 + wr()*480;
+    const k = PACKS[wr()*PACKS.length|0];
+    if (packs.length < 5) packs.push({x:p.x+Math.cos(a)*d, y:p.y+Math.sin(a)*d, k, t:0});
   }
   for (let i=packs.length-1;i>=0;i--){
     const pk = packs[i];
@@ -2002,6 +2058,7 @@ function finish(won){
   const gain = runReward();
   meta.pts += gain; meta.runs = (meta.runs||0) + 1; saveMeta();
   UI.sGain.textContent = '+' + gain;
+  document.getElementById('sSeed').textContent = seedCode(seed);
   lastRun = {survived: MODE === 'timed' ? Math.min(T, GOAL) : T, kills, level: p.lv, mode: MODE};
   boardMode = MODE;
   syncTabs();
