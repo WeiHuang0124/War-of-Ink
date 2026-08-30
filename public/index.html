@@ -208,6 +208,16 @@
   .rchip.new{border-color:var(--zhu);color:var(--zhu);font-weight:700}
   .gw{font-size:10px;color:var(--ink-soft);letter-spacing:.04em;margin-top:1px}
   .gsash{font-size:10px;color:var(--jin);letter-spacing:.1em;height:12px}
+  .roomcode{
+    font-size:clamp(42px,12vw,68px);font-weight:900;letter-spacing:.28em;
+    text-align:center;color:var(--zhu);margin:2px 0 8px;
+  }
+  .prow{
+    display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;
+    padding:10px 2px;border-bottom:1px solid rgba(27,26,23,.12);font-size:14px;
+  }
+  .prow .pd{font-size:11px;color:var(--ink-soft);letter-spacing:.1em}
+  .prow .ph{font-size:10px;color:var(--jin);letter-spacing:.14em}
   .seedin{
     border:2px solid var(--ink);background:transparent;padding:9px 10px;width:104px;
     font:inherit;font-size:16px;font-weight:700;letter-spacing:.16em;text-align:center;
@@ -250,6 +260,7 @@
     <div>
       <button class="link" id="btnMeta">修行</button>
       <button class="link" id="btnPeek">觀榜</button>
+      <button class="link" id="btnRoom">對局</button>
       <button class="link" id="btnCodexHome">印譜</button>
       <button class="link" id="btnOpts">設定</button>
     </div>
@@ -304,6 +315,48 @@
     <div class="modes">
       <button class="go serif" id="btnGuide">說明書</button>
       <button class="go serif" id="btnOptsBack">回　去</button>
+    </div>
+  </div>
+</div>
+
+<div class="veil" id="room">
+  <div class="plate" style="max-width:520px">
+    <div class="lvl-head"><h2 class="serif">對　局</h2><small id="roomSub">同一顆種子，各打各的</small></div>
+
+    <div id="roomLobby">
+      <div class="orow">
+        <div><div class="on2 serif">你的名號</div>
+          <div class="od">會顯示在對手畫面上。</div></div>
+        <input id="rName" class="seedin" maxlength="8" placeholder="無名氏" style="width:120px;letter-spacing:.06em">
+      </div>
+      <div class="modes">
+        <button class="go serif" id="btnMakeRoom">開　房</button>
+      </div>
+      <div class="orow">
+        <div><div class="on2 serif">加入房間</div>
+          <div class="od">輸入對方給你的四碼房號。</div></div>
+        <input id="rCode" class="seedin" maxlength="4" placeholder="房號">
+      </div>
+      <div class="modes">
+        <button class="go serif" id="btnJoinRoom">加　入</button>
+        <button class="go serif" id="btnRoomBack">回　去</button>
+      </div>
+    </div>
+
+    <div id="roomIn" style="display:none">
+      <p class="muted" style="margin:0 0 6px">房號</p>
+      <div class="roomcode serif" id="rShow">----</div>
+      <p class="muted" id="rHint">把房號念給對手，他從「對局 → 加入」進來。</p>
+      <div class="tabs" id="rModes">
+        <button class="tab on" data-rmode="timed">五分鐘</button>
+        <button class="tab" data-rmode="endless">無　盡</button>
+        <button class="tab" data-rmode="rpg">修　羅</button>
+      </div>
+      <div id="rList"></div>
+      <div class="modes">
+        <button class="go serif" id="btnRoomStart">開　打</button>
+        <button class="go serif" id="btnRoomLeave">離　開</button>
+      </div>
     </div>
   </div>
 </div>
@@ -393,6 +446,7 @@
       <input id="nameIn" maxlength="8" placeholder="留個名號" autocomplete="off" spellcheck="false">
       <button class="go serif" id="btnPost">上榜</button>
     </div>
+    <div id="vsBox" style="display:none;margin-top:18px"></div>
     <div class="board">
       <div class="tabs">
         <button class="tab on" data-mode="timed">五分鐘</button>
@@ -415,7 +469,7 @@
 (() => {
 "use strict";
 
-const VER = "v1.6";
+const VER = "v1.7";
 document.getElementById("verTag").textContent = VER;
 
 // ─────────────────────────── 畫布 ───────────────────────────
@@ -639,6 +693,7 @@ const UI = {
   rText: document.getElementById('rText'),
   rSub:  document.getElementById('rSub'),
   intro: document.getElementById('intro'),
+  room:  document.getElementById('room'),
   guide: document.getElementById('guide'),
   pause: document.getElementById('pause'),
   opts:  document.getElementById('opts'),
@@ -652,7 +707,7 @@ const UI = {
   boardMsg:document.getElementById('boardMsg'),
   boardTitle: document.getElementById('boardTitle')
 };
-const VEILS = ['start','lvl','end','meta','pause','opts','codex','reel','intro','guide'];
+const VEILS = ['start','lvl','end','meta','pause','opts','codex','reel','intro','guide','room'];
 const showVeil = el => { for (const k of VEILS) UI[k].classList.toggle('on', UI[k] === el); };
 const hideVeils = () => { for (const k of VEILS) UI[k].classList.remove('on'); };
 
@@ -965,6 +1020,102 @@ function begin(mode){
   const sg = SIG[p.sig];                       // 開局先報一次這場帶的專屬技能
   if (sg) say(skinNow().n + '　' + sg.n, sg.d, C.jin);
 }
+// ─────────────────────────── 對局連線 ───────────────────────────
+// 只傳心跳，不傳世界。世界由種子決定，各自在自己的瀏覽器裡跑，
+// 所以延遲高也不影響公平性，斷線也只是看不到對手而已。
+const NET = {
+  ws:null, code:'', mode:'endless', phase:'lobby',
+  me:'', players:[], host:false, tickT:0, live:false
+};
+const CODE_CH = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // 去掉容易念錯的 0O1I
+const makeCode = () => Array.from({length:4},
+  () => CODE_CH[Math.random()*CODE_CH.length|0]).join('');
+
+function netConnect(code){
+  netClose();
+  NET.code = code;
+  const name = (document.getElementById('rName').value || '').trim().slice(0,8) || '無名氏';
+  try { localStorage.setItem('war-of-ink.name', name); } catch {}
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  let ws;
+  try {
+    NET.me = 'p' + Math.random().toString(36).slice(2, 10);   // 自己產 id，才認得出名單裡哪個是自己
+    ws = new WebSocket(
+      `${proto}://${location.host}/api/room/${code}?name=${encodeURIComponent(name)}&id=${NET.me}`);
+  } catch { roomHint('連不上房間服務。'); return; }
+  NET.ws = ws;
+
+  ws.onopen = () => {
+    NET.live = true;
+    document.getElementById('roomLobby').style.display = 'none';
+    document.getElementById('roomIn').style.display = '';
+    document.getElementById('rShow').textContent = code;
+    roomHint('把房號念給對手，他從「對局 → 加入」進來。');
+  };
+  ws.onmessage = ev => {
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.type === 'state'){
+      NET.players = m.players || [];
+      NET.phase = m.phase; NET.mode = m.mode;
+      NET.host = !!(NET.players.find(x => x.id === NET.me) || {}).host;
+      renderRoom();
+    }
+    if (m.type === 'start'){
+      nextSeed = m.seed % 0x7FFFFFFF;
+      begin(m.mode);
+    }
+  };
+  ws.onclose = () => { NET.live = false; roomHint('連線已中斷。'); renderRoom(); };
+  ws.onerror = () => { NET.live = false; roomHint('連線出錯，可能是還沒部署房間服務。'); };
+}
+function netClose(){
+  if (NET.ws){ try { NET.ws.close(); } catch {} }
+  NET.ws = null; NET.live = false; NET.players = []; NET.host = false;
+}
+const netSend = o => { if (NET.ws && NET.ws.readyState === 1) NET.ws.send(JSON.stringify(o)); };
+const roomHint = t => { document.getElementById('rHint').textContent = t; };
+
+function renderRoom(){
+  const list = document.getElementById('rList');
+  list.innerHTML = '';
+  for (const pl of NET.players){
+    const d = document.createElement('div');
+    d.className = 'prow';
+    d.innerHTML = `<div class="serif" style="font-weight:900">${esc(pl.name)}</div>
+      <div class="pd">${pl.id === NET.me ? '你' : '　'}</div>
+      <div class="ph">${pl.host ? '房主' : ''}</div>`;
+    list.appendChild(d);
+  }
+  document.getElementById('btnRoomStart').style.display = NET.host ? '' : 'none';
+  if (!NET.host && NET.live) roomHint('等房主開打。');
+  [...document.querySelectorAll('[data-rmode]')].forEach(b => {
+    b.classList.toggle('on', b.dataset.rmode === NET.mode);
+    b.disabled = !NET.host;
+  });
+}
+
+document.getElementById('btnRoom').onclick = () => {
+  try {
+    const el = document.getElementById('rName');
+    if (!el.value) el.value = localStorage.getItem('war-of-ink.name') || '';   // 不要蓋掉已經打好的
+  } catch {}
+  document.getElementById('roomLobby').style.display = '';
+  document.getElementById('roomIn').style.display = 'none';
+  showVeil(UI.room);
+};
+document.getElementById('btnRoomBack').onclick  = () => showVeil(UI.start);
+document.getElementById('btnMakeRoom').onclick  = () => netConnect(makeCode());
+document.getElementById('btnJoinRoom').onclick  = () => {
+  const c = (document.getElementById('rCode').value || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{4}$/.test(c)){ roomHint('房號是四碼英數。'); return; }
+  netConnect(c);
+};
+document.getElementById('btnRoomLeave').onclick = () => { netClose(); showVeil(UI.start); };
+document.getElementById('btnRoomStart').onclick = () => netSend({type:'start'});
+[...document.querySelectorAll('[data-rmode]')].forEach(b => {
+  b.onclick = () => { if (NET.host) netSend({type:'mode', mode:b.dataset.rmode}); };
+});
+
 // ─────────────────────────── 玩法說明 ───────────────────────────
 const sec = (h, p) => `<div class="sec"><h4 class="serif">${h}</h4><p>${p}</p></div>`;
 
@@ -1937,6 +2088,13 @@ function update(dt){
     if (m.t >= m.life) motes.splice(i,1);
   }
 
+  if (NET.live){                       // 每 0.4 秒回報一次，只有五個數字
+    NET.tickT -= dt;
+    if (NET.tickT <= 0){
+      NET.tickT = 0.4;
+      netSend({type:'tick', t:T, kills, lv:p.lv, hp:p.hp/p.maxHp, stacks:p.stacks});
+    }
+  }
   if (banner){ banner.t += dt; if (banner.t > 2.6) banner = null; }
   if (flash > 0) flash -= dt;
 
@@ -2059,7 +2217,17 @@ function finish(won){
   meta.pts += gain; meta.runs = (meta.runs||0) + 1; saveMeta();
   UI.sGain.textContent = '+' + gain;
   document.getElementById('sSeed').textContent = seedCode(seed);
+  const vs = document.getElementById('vsBox');
+  const others = NET.live ? NET.players.filter(x => x.id !== NET.me) : [];
+  if (others.length){
+    vs.style.display = '';
+    vs.innerHTML = '<p class="muted" style="margin:0 0 4px">同種子對局</p>' + others.map(o =>
+      `<div class="prow"><div class="serif" style="font-weight:900">${esc(o.name)}</div>
+       <div class="pd">${o.done ? '已倒下' : '還在打'}</div>
+       <div style="font-weight:800">${fmt(o.t)}　${o.kills} 墨</div></div>`).join('');
+  } else vs.style.display = 'none';
   lastRun = {survived: MODE === 'timed' ? Math.min(T, GOAL) : T, kills, level: p.lv, mode: MODE};
+  if (NET.live) netSend({type:'dead', peak:p.peak});
   boardMode = MODE;
   syncTabs();
   myId = null; posting = false;
@@ -2923,6 +3091,36 @@ function drawHUD(){
       ctx.fillStyle = it ? '#F4EFE2' : 'rgba(27,26,23,.28)';
       ctx.fillText(GEAR[sl].ch, bx + 12.5, by + 13);
     });
+  }
+
+  // 對手狀態條
+  if (NET.live && NET.players.length > 1){
+    const others = NET.players.filter(x => x.id !== NET.me);
+    const bw = Math.min(190, W*0.38);
+    let y = pad + 62;
+    ctx.textBaseline = 'middle';
+    for (const o of others){
+      ctx.textAlign = 'left';
+      ctx.font = '800 14px "Noto Serif TC","Songti TC",serif';
+      ctx.fillStyle = o.done ? 'rgba(27,26,23,.4)' : C.ink;
+      ctx.fillText(o.name, W - pad - bw, y);
+      ctx.textAlign = 'right';
+      ctx.font = '700 14px system-ui,sans-serif';
+      ctx.fillText(o.done ? '已倒下' : fmt(o.t), W - pad, y);
+
+      ctx.fillStyle = 'rgba(27,26,23,.14)';
+      ctx.fillRect(W - pad - bw, y + 11, bw, 5);
+      ctx.fillStyle = o.done ? 'rgba(27,26,23,.25)' : C.zhu;
+      ctx.fillRect(W - pad - bw, y + 11, bw*Math.max(0, Math.min(1, o.hp)), 5);
+
+      ctx.textAlign = 'left';
+      ctx.font = '600 11px system-ui,sans-serif';
+      ctx.fillStyle = C.ink; ctx.globalAlpha = .6;
+      ctx.fillText(`化墨 ${o.kills}　筆力 ${o.lv}` + (MODE === 'rpg' ? `　銳氣 ${o.stacks}` : ''),
+                   W - pad - bw, y + 26);
+      ctx.globalAlpha = 1;
+      y += 46;
+    }
   }
 
   // 倒數

@@ -9,6 +9,8 @@ const KEEP  = 500;  // 資料表最多保留幾筆
 const GOAL  = 300;   // 計時模式長度（秒）
 const CAP   = 21600; // 無盡模式收到六小時為止
 
+export { Room } from './room.js';
+
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -113,6 +115,14 @@ async function handlePost(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    // 對局房間：/api/room/XXXX 升級成 WebSocket
+    if (url.pathname.startsWith('/api/room/')) {
+      if (!env.ROOM) return json({ ok: false, error: '房間服務尚未啟用' }, 500);
+      const code = url.pathname.slice('/api/room/'.length).toUpperCase();
+      if (!/^[A-Z0-9]{4}$/.test(code)) return json({ ok: false, error: '房號格式錯誤' }, 400);
+      return env.ROOM.get(env.ROOM.idFromName(code)).fetch(request);
+    }
 
     if (url.pathname === '/api/scores') {
       if (!env.DB) return json({ ok: false, error: '資料庫尚未綁定' }, 500);
