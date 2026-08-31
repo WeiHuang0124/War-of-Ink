@@ -10,6 +10,7 @@ const GOAL  = 300;   // 計時模式長度（秒）
 const CAP   = 21600; // 無盡模式收到六小時為止
 
 export { Room } from './room.js';
+export { Directory } from './directory.js';
 
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -115,6 +116,12 @@ async function handlePost(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    // 大廳：現在開著哪些房
+    if (url.pathname === '/api/rooms') {
+      if (!env.DIR) return json({ ok: true, rooms: [] });
+      return env.DIR.get(env.DIR.idFromName('index')).fetch('https://dir/');
+    }
 
     // 對局房間：/api/room/XXXX 升級成 WebSocket
     if (url.pathname.startsWith('/api/room/')) {

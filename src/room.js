@@ -27,7 +27,9 @@ export class Room {
     this.env = env;
     this.lastCast = 0;
     this.ctx.blockConcurrencyWhile(async () => {
-      this.room = (await this.ctx.storage.get('room')) || { phase: 'lobby', mode: 'endless', seed: 0 };
+      this.room = (await this.ctx.storage.get('room'))
+        || { phase: 'lobby', mode: 'endless', seed: 0, kind: 'versus', code: '' };
+      if (!this.room.kind) this.room.kind = 'versus';
     });
   }
 
@@ -39,6 +41,11 @@ export class Room {
     if (this.ctx.getWebSockets().length >= MAX_PLAYERS)
       return jsonRes({ ok: false, error: '房間滿了' }, 409);
 
+    const code = url.pathname.slice(url.pathname.lastIndexOf('/') + 1).toUpperCase();
+    if (code) this.room.code = code;
+    const kindWanted = url.searchParams.get('kind');
+    if (!this.ctx.getWebSockets().length && (kindWanted === 'coop' || kindWanted === 'versus'))
+      this.room.kind = kindWanted;                 // 第一個進來的人決定房型
     const name = (url.searchParams.get('name') || '').trim().slice(0, 8) || '無名氏';
     // 由客戶端帶自己的 id 進來，它才知道名單裡哪一個是自己。
     // 伺服器只負責清洗，不接受奇怪字元。
@@ -55,6 +62,7 @@ export class Room {
     });
 
     this.cast(true);
+    this.announce();
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -77,7 +85,29 @@ export class Room {
         id: a.id, name: a.name, t: a.t, kills: a.kills, lv: a.lv,
         hp: a.hp, stacks: a.stacks, peak: a.peak, done: a.done, host: a.id === host
       }));
-    return { type: 'state', phase: this.room.phase, mode: this.room.mode, players };
+    return { type: 'state', phase: this.room.phase, mode: this.room.mode,
+             kind: this.room.kind, host, players };
+  }
+
+  // 向目錄回報自己還活著。節流到每 15 秒一次就夠，目錄的過期門檻是 45 秒。
+  announce() {
+    const now = Date.now();
+    if (now - (this.lastAnn || 0) < 15000 && this.ctx.getWebSockets().length) return;
+    this.lastAnn = now;
+    const players = this.ctx.getWebSockets().length;
+    const first = this.ctx.getWebSockets()
+      .map(w => w.deserializeAttachment()).filter(Boolean)
+      .sort((a, b) => a.joined - b.joined)[0];
+    if (!this.env.DIR || !this.room.code) return;
+    const body = JSON.stringify({
+      code: this.room.code, host: first ? first.name : '', mode: this.room.mode,
+      kind: this.room.kind, players, playing: this.room.phase === 'play'
+    });
+    this.ctx.waitUntil(
+      this.env.DIR.get(this.env.DIR.idFromName('index'))
+        .fetch('https://dir/', { method: 'POST', body })
+        .catch(() => {})
+    );
   }
 
   cast(force) {
@@ -119,6 +149,26 @@ export class Room {
       return;
     }
 
+    // ── 合作模式的三種封包，走最短路徑，不做任何驗證以外的處理 ──
+    if (m.type === 'w') {                   // 主機廣播世界快照
+      if (me.id !== this.hostId()) return;
+      const out = JSON.stringify(m);
+      for (const ws2 of this.ctx.getWebSockets()) {
+        if (ws2 === ws) continue;
+        try { ws2.send(out); } catch {}
+      }
+      return;
+    }
+    if (m.type === 'in' || m.type === 'dmg') {   // 訪客回報輸入與命中，只給主機
+      m.from = me.id; m.name = me.name;
+      const out = JSON.stringify(m);
+      for (const ws2 of this.ctx.getWebSockets()) {
+        const a2 = ws2.deserializeAttachment();
+        if (a2 && a2.id === this.hostId()) { try { ws2.send(out); } catch {} }
+      }
+      return;
+    }
+
     if (m.type === 'dead') {
       me.done = true;
       me.peak = Math.round(Number(m.peak) || 0);
@@ -136,6 +186,16 @@ export class Room {
 
     // 以下只有房主能做
     if (me.id !== this.hostId()) return;
+
+    if (m.type === 'kind') {
+      if (m.kind === 'coop' || m.kind === 'versus') {
+        this.room.kind = m.kind;
+        await this.ctx.storage.put('room', this.room);
+        this.cast(true);
+        this.lastAnn = 0; this.announce();
+      }
+      return;
+    }
 
     if (m.type === 'mode') {
       if (['timed', 'endless', 'rpg'].includes(m.mode)) {
@@ -156,8 +216,10 @@ export class Room {
         Object.assign(a, { t: 0, kills: 0, lv: 1, hp: 1, stacks: 0, peak: 0, done: false });
         w.serializeAttachment(a);
       }
-      this.sendAll({ type: 'start', seed: this.room.seed, mode: this.room.mode });
+      this.sendAll({ type: 'start', seed: this.room.seed, mode: this.room.mode,
+                     kind: this.room.kind, host: this.hostId() });
       this.cast(true);
+      this.lastAnn = 0; this.announce();
       return;
     }
 
@@ -171,6 +233,7 @@ export class Room {
   async webSocketClose(ws) {
     // attachment 隨著連線一起消失，這裡只要通知其他人重畫名單
     this.cast(true);
+    this.lastAnn = 0; this.announce();
   }
 
   async webSocketError(ws) {

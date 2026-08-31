@@ -329,9 +329,20 @@
           <div class="od">會顯示在對手畫面上。</div></div>
         <input id="rName" class="seedin" maxlength="8" placeholder="無名氏" style="width:120px;letter-spacing:.06em">
       </div>
+      <div class="tabs" id="rKinds">
+        <button class="tab on" data-rkind="versus">對　奕</button>
+        <button class="tab" data-rkind="coop">合　作</button>
+      </div>
+      <p class="muted" id="kindHint" style="margin:2px 0 10px">
+        對奕：同一顆種子，各打各的，比誰撐得久。</p>
       <div class="modes">
         <button class="go serif" id="btnMakeRoom">開　房</button>
       </div>
+      <div class="lvl-head" style="margin:18px 0 2px">
+        <h2 class="serif" style="font-size:19px">開著的房</h2>
+        <small><button class="link" id="btnRefresh" style="margin:0;padding:2px">重新整理</button></small>
+      </div>
+      <div id="rOpen"></div>
       <div class="orow">
         <div><div class="on2 serif">加入房間</div>
           <div class="od">輸入對方給你的四碼房號。</div></div>
@@ -347,6 +358,7 @@
       <p class="muted" style="margin:0 0 6px">房號</p>
       <div class="roomcode serif" id="rShow">----</div>
       <p class="muted" id="rHint">把房號念給對手，他從「對局 → 加入」進來。</p>
+      <p class="muted" id="rKindNow" style="margin:0 0 8px">　</p>
       <div class="tabs" id="rModes">
         <button class="tab on" data-rmode="timed">五分鐘</button>
         <button class="tab" data-rmode="endless">無　盡</button>
@@ -469,7 +481,7 @@
 (() => {
 "use strict";
 
-const VER = "v1.7";
+const VER = "v1.8";
 document.getElementById("verTag").textContent = VER;
 
 // ─────────────────────────── 畫布 ───────────────────────────
@@ -720,7 +732,7 @@ let banner = null, flash = 0;
 // 每個提示都要說清楚「發生什麼」跟「實際數字」，不然玩家永遠不知道自己撿到什麼
 const say = (title, sub, col) => { banner = {title, sub, col:col || null, t:0}; };
 let MODE = 'timed';                       // 'timed' | 'endless'
-let nextBoss = 0, bossCount = 0;
+let nextBoss = 0, bossCount = 0, enemyId = 0;
 const GOAL = 300; // 五分鐘
 
 // ─────────────────────────── 印譜 ───────────────────────────
@@ -1024,16 +1036,102 @@ function begin(mode){
 // 只傳心跳，不傳世界。世界由種子決定，各自在自己的瀏覽器裡跑，
 // 所以延遲高也不影響公平性，斷線也只是看不到對手而已。
 const NET = {
-  ws:null, code:'', mode:'endless', phase:'lobby',
+  ws:null, code:'', mode:'endless', phase:'lobby', kind:'versus',
   me:'', players:[], host:false, tickT:0, live:false
 };
+
+// 合作模式。主機模擬全世界，訪客只畫快照。
+// 訪客的筆鋒在本機即時判定，命中後只回報 [敵人id, 傷害]，由主機結算生死——
+// 這樣射擊手感沒有延遲，頻寬也只有幾 KB。
+const CO = {
+  on:false, host:false, dead:[],
+  mates:new Map(),        // id → {name,x,y,aim,hp,lv,skin,t}
+  hits:[],                // 訪客待回報的命中
+  sendT:0, seenIds:new Set()
+};
+// TYPES 宣告在後面，這裡不能立刻取值，會踩到 TDZ
+let KIND_CACHE = null;
+const kindList = () => KIND_CACHE || (KIND_CACHE = Object.keys(TYPES));
+const isGuest = () => CO.on && !CO.host;
+
+function coReset(){
+  CO.on = false; CO.host = false;
+  CO.mates.clear(); CO.hits.length = 0; CO.dead.length = 0;
+  CO.sendT = 0; CO.seenIds.clear();
+}
+
+// 主機：把畫面附近的敵人與所有玩家壓成一包
+function coSnapshot(){
+  const ox = Math.round(p.x), oy = Math.round(p.y);
+  const reach = Math.hypot(W, H)*0.75;
+  const es = [];
+  let n = 0;
+  for (const e of enemies){
+    if (n >= 110) break;                      // 太遠的不傳，省頻寬
+    let near = Math.hypot(e.x-p.x, e.y-p.y) < reach;
+    if (!near) for (const mt of CO.mates.values())
+      if (Math.hypot(e.x-mt.x, e.y-mt.y) < reach){ near = true; break; }
+    if (!near) continue;
+    es.push(e.id, Math.round(e.x)-ox, Math.round(e.y)-oy,
+            kindList().indexOf(e.kind), Math.round(e.hp/e.maxHp*100));
+    n++;
+  }
+  const ps = [];
+  ps.push(0, 0, 0, +p.aim.toFixed(2), Math.round(p.hp/p.maxHp*100), p.lv);
+  const ds = CO.dead.slice(); CO.dead.length = 0;
+  return {type:'w', ox, oy, es, ps, ds};
+}
+
+// 訪客：把快照套進 enemies，沿用既有的繪製流程
+function coApply(m){
+  const seen = new Set();
+  const es = m.es;
+  for (let i=0;i<es.length;i+=5){
+    const id = es[i], x = m.ox + es[i+1], y = m.oy + es[i+2];
+    const kind = kindList()[es[i+3]] || 'blot', hpq = es[i+4];
+    seen.add(id);
+    let e = enemies.find(q => q.id === id);
+    if (!e){
+      const t = TYPES[kind];
+      e = {id, kind, x, y, r:t.r, col:t.col, boss:!!t.boss, spd:t.spd,
+           dmg:t.dmg, xp:t.xp, maxHp:100, hp:hpq,
+           lobes:makeLobes(t.lobes), flash:0, wob:Math.random()*10,
+           kx:0, ky:0, chill:0, burn:0, bleed:0, remote:true, tx:x, ty:y};
+      enemies.push(e);
+    }
+    e.tx = x; e.ty = y; e.hp = hpq; e.maxHp = 100;
+  }
+  // 主機明講哪些是真的死了；其餘只是被裁掉，安靜移除就好
+  const dead = new Set(m.ds || []);
+  for (let i=enemies.length-1;i>=0;i--){
+    const e = enemies[i];
+    if (seen.has(e.id)) continue;
+    if (dead.has(e.id)){
+      splat(e.x, e.y, e.boss?40:8, e.col, e.boss?240:110);
+      orbs.push({x:e.x, y:e.y, v:e.xp||1, vx:0, vy:0, t:0});
+      kills++;
+      SFX.play('kill');
+      if (MODE === 'rpg'){ p.stacks++; if (p.stacks > p.peak) p.peak = p.stacks; }
+    }
+    enemies.splice(i,1);
+  }
+  CO.mates.clear();
+  const ps = m.ps;
+  for (let i=0;i<ps.length;i+=6){
+    CO.mates.set(m.hostId || 'host', {
+      name: m.hostName || '房主', x: m.ox + ps[i+1], y: m.oy + ps[i+2],
+      aim: ps[i+3], hp: ps[i+4]/100, lv: ps[i+5]
+    });
+  }
+}
 const CODE_CH = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // 去掉容易念錯的 0O1I
 const makeCode = () => Array.from({length:4},
   () => CODE_CH[Math.random()*CODE_CH.length|0]).join('');
 
-function netConnect(code){
+function netConnect(code, kind){
   netClose();
   NET.code = code;
+  NET.kind = kind || 'versus';
   const name = (document.getElementById('rName').value || '').trim().slice(0,8) || '無名氏';
   try { localStorage.setItem('war-of-ink.name', name); } catch {}
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -1041,7 +1139,8 @@ function netConnect(code){
   try {
     NET.me = 'p' + Math.random().toString(36).slice(2, 10);   // 自己產 id，才認得出名單裡哪個是自己
     ws = new WebSocket(
-      `${proto}://${location.host}/api/room/${code}?name=${encodeURIComponent(name)}&id=${NET.me}`);
+      `${proto}://${location.host}/api/room/${code}` +
+      `?name=${encodeURIComponent(name)}&id=${NET.me}&kind=${NET.kind}`);
   } catch { roomHint('連不上房間服務。'); return; }
   NET.ws = ws;
 
@@ -1056,19 +1155,40 @@ function netConnect(code){
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === 'state'){
       NET.players = m.players || [];
-      NET.phase = m.phase; NET.mode = m.mode;
+      NET.phase = m.phase; NET.mode = m.mode; NET.kind = m.kind || 'versus';
       NET.host = !!(NET.players.find(x => x.id === NET.me) || {}).host;
       renderRoom();
     }
     if (m.type === 'start'){
+      coReset();
+      if (m.kind === 'coop'){
+        CO.on = true;
+        CO.host = m.host === NET.me;
+      }
       nextSeed = m.seed % 0x7FFFFFFF;
       begin(m.mode);
+    }
+    if (m.type === 'w' && CO.on && !CO.host){          // 訪客收到世界快照
+      m.hostId = 'host';
+      m.hostName = (NET.players.find(x => x.host) || {}).name || '房主';
+      coApply(m);
+    }
+    if (m.type === 'in' && CO.on && CO.host){          // 主機收到隊友位置
+      CO.mates.set(m.from, {name:m.name, x:m.x, y:m.y, aim:m.aim, hp:m.hp, lv:m.lv});
+    }
+    if (m.type === 'dmg' && CO.on && CO.host){         // 主機結算隊友打出的傷害
+      const h = m.h || [];
+      for (let i=0;i<h.length;i+=2){
+        const e = enemies.find(q => q.id === h[i]);
+        if (e) hurt(e, h[i+1], 0, 0);
+      }
     }
   };
   ws.onclose = () => { NET.live = false; roomHint('連線已中斷。'); renderRoom(); };
   ws.onerror = () => { NET.live = false; roomHint('連線出錯，可能是還沒部署房間服務。'); };
 }
 function netClose(){
+  coReset();
   if (NET.ws){ try { NET.ws.close(); } catch {} }
   NET.ws = null; NET.live = false; NET.players = []; NET.host = false;
 }
@@ -1086,6 +1206,7 @@ function renderRoom(){
       <div class="ph">${pl.host ? '房主' : ''}</div>`;
     list.appendChild(d);
   }
+  document.getElementById('rKindNow').textContent = KIND_TXT[NET.kind] || '';
   document.getElementById('btnRoomStart').style.display = NET.host ? '' : 'none';
   if (!NET.host && NET.live) roomHint('等房主開打。');
   [...document.querySelectorAll('[data-rmode]')].forEach(b => {
@@ -1102,9 +1223,54 @@ document.getElementById('btnRoom').onclick = () => {
   document.getElementById('roomLobby').style.display = '';
   document.getElementById('roomIn').style.display = 'none';
   showVeil(UI.room);
+  loadRooms();
 };
+// 房型
+let wantKind = 'versus';
+const KIND_TXT = {
+  versus:'對奕：同一顆種子，各打各的，比誰撐得久。',
+  coop:'合作：同一個世界，看得到對方，一起清場。人越多墨越硬也越密。'
+};
+[...document.querySelectorAll('[data-rkind]')].forEach(b => {
+  b.onclick = () => {
+    wantKind = b.dataset.rkind;
+    [...document.querySelectorAll('[data-rkind]')].forEach(x =>
+      x.classList.toggle('on', x.dataset.rkind === wantKind));
+    document.getElementById('kindHint').textContent = KIND_TXT[wantKind];
+  };
+});
+
+// 大廳列表
+async function loadRooms(){
+  const box = document.getElementById('rOpen');
+  box.innerHTML = '<p class="muted" style="margin:6px 0">讀取中…</p>';
+  try {
+    const res = await fetch('/api/rooms', {cache:'no-store'});
+    const data = await res.json();
+    const rs = (data.rooms || []).filter(r => r.players < 4);
+    if (!rs.length){ box.innerHTML = '<p class="muted" style="margin:6px 0">現在沒有開著的房。開一間吧。</p>'; return; }
+    box.innerHTML = '';
+    for (const r of rs){
+      const d = document.createElement('div');
+      d.className = 'prow';
+      d.innerHTML = `<div class="serif" style="font-weight:900;letter-spacing:.2em">${r.code}</div>
+        <div class="pd">${esc(r.host||'')}　${r.kind === 'coop' ? '合作' : '對奕'}　${
+          r.mode === 'timed' ? '五分鐘' : r.mode === 'rpg' ? '修羅' : '無盡'}${
+          r.playing ? '　進行中' : ''}</div>`;
+      const b = document.createElement('button');
+      b.className = 'buy serif'; b.textContent = r.players + '/4';
+      b.onclick = () => netConnect(r.code, r.kind);
+      d.appendChild(b);
+      box.appendChild(d);
+    }
+  } catch {
+    box.innerHTML = '<p class="muted" style="margin:6px 0">列表讀不到，可能是房間服務還沒部署。直接用房號加入也可以。</p>';
+  }
+}
+document.getElementById('btnRefresh').onclick = loadRooms;
+
 document.getElementById('btnRoomBack').onclick  = () => showVeil(UI.start);
-document.getElementById('btnMakeRoom').onclick  = () => netConnect(makeCode());
+document.getElementById('btnMakeRoom').onclick  = () => netConnect(makeCode(), wantKind);
 document.getElementById('btnJoinRoom').onclick  = () => {
   const c = (document.getElementById('rCode').value || '').trim().toUpperCase();
   if (!/^[A-Z0-9]{4}$/.test(c)){ roomHint('房號是四碼英數。'); return; }
@@ -1238,7 +1404,9 @@ const BOSS_NAME = {
 
 // 無盡模式後段改成複利，不然玩家的乘算成長會直接輾過線性的敵人
 function hpScale(){
-  const lin = 1 + T*0.011;
+  const heads = CO.on ? 1 + CO.mates.size : 1;
+  const crowd = 1 + 0.28*(heads - 1);          // 人越多，墨越硬
+  const lin = (1 + T*0.011) * crowd;
   if (MODE === 'endless') return lin * Math.pow(1.05, T/30);
   if (MODE === 'rpg')     return lin * Math.pow(1.05, T/38);
   return lin;
@@ -1274,6 +1442,7 @@ function spawnEnemy(kind, at, R){
     dmg: t.dmg*dmgScale(), xp: t.xp, col: t.col, boss: !!t.boss,
     lobes: makeLobes(t.lobes), flash:0, wob: Math.random()*10,
     shootT: t.shoot ? Math.random()*t.shoot : 0, shoot: t.shoot||0,
+    id: ++enemyId,
     kx:0, ky:0, bk: t.boss || null,
     world: R === wr,        // 由世界亂數生成＝兩邊一定一樣；墨王召喚出來的則否
     chT: 1.6, phase: 'wind', dvx: 0, dvy: 0, sumT: 2.0
@@ -1613,9 +1782,10 @@ function update(dt){
 
   // 生成
   spawnT -= dt;
-  if (spawnT <= 0){
+  if (spawnT <= 0 && !isGuest()){
     spawnT = Math.max(0.38, 0.92 - T*0.0018);
-    const n = 1 + Math.floor(T/95);
+    const heads = CO.on ? 1 + CO.mates.size : 1;
+    const n = Math.round((1 + Math.floor(T/95)) * (1 + 0.55*(heads-1)));
     const room = enemies.length < 210;
     for (let i=0;i<n;i++){
       // 上限擋下時也要照抽，不然兩邊的亂數流會錯開
@@ -1625,7 +1795,8 @@ function update(dt){
     }
   }
   let due = 0;
-  if (MODE === 'timed'){
+  if (isGuest()){ /* 訪客的敵人全部來自主機 */ }
+  else if (MODE === 'timed'){
     if (bossQueue.length && T >= bossQueue[0]){ bossQueue.shift(); due = 1; }
   } else if (T >= nextBoss){
     if (MODE === 'rpg'){
@@ -1850,7 +2021,12 @@ function update(dt){
         if ((e.x-b.x)**2 + (e.y-b.y)**2 < rr*rr){
           let dmg = b.dmg;
           if (p.sig === 'xuhuang' && e.hp > e.maxHp*0.5) dmg *= 1.32;   // 開山
-          hurt(e, dmg, b.vx, b.vy);
+          if (isGuest()){
+            // 本機立刻給回饋，但生死由主機判定
+            CO.hits.push(e.id, Math.round(dmg));
+            e.flash = 1; addNum(e, dmg);
+            splat(e.x, e.y, 2, e.col, 60);
+          } else hurt(e, dmg, b.vx, b.vy);
           if (p.sig === 'zhouyu'){ e.burn = 3; e.burnDps = 5*p.dmgMul; } // 火攻
           SFX.play('hit');
           if (p.burn){ e.burn = 3; e.burnDps = 6*p.burn*p.dmgMul; }
@@ -1869,6 +2045,17 @@ function update(dt){
   // 敵人
   for (let i=enemies.length-1;i>=0;i--){
     const e = enemies[i];
+    if (e.remote){                       // 訪客：位置由主機決定，這裡只做平滑
+      const k = Math.min(1, dt*14);
+      e.x += (e.tx - e.x)*k; e.y += (e.ty - e.y)*k;
+      e.flash = Math.max(0, e.flash - dt*4);
+      e.wob += dt;
+      if (p.iframe <= 0){
+        const rr = e.r + p.r;
+        if ((e.x-p.x)**2 + (e.y-p.y)**2 < rr*rr) damagePlayer(e.dmg);
+      }
+      continue;
+    }
     let dx = p.x-e.x, dy = p.y-e.y, d = Math.hypot(dx,dy) || 1;
     if (d > 1500 && !e.boss){
       const a = Math.random()*Math.PI*2, ring = Math.hypot(W,H)/2 + 70;
@@ -1898,6 +2085,14 @@ function update(dt){
       chillMul = 1 - Math.min(0.55, 0.16*p.frost);
     }
 
+    if (CO.on && CO.host && CO.mates.size){        // 追離自己最近的那個玩家
+      let bx = p.x, by = p.y, bd = d;
+      for (const mt of CO.mates.values()){
+        const md = Math.hypot(mt.x-e.x, mt.y-e.y);
+        if (md < bd){ bd = md; bx = mt.x; by = mt.y; }
+      }
+      dx = bx-e.x; dy = by-e.y; d = bd || 1;
+    }
     let chase = 1;
 
     if (e.bk === 'yan'){                       // 硯獸：蓄力後直線衝刺
@@ -1994,7 +2189,8 @@ function update(dt){
       if ((e.x-p.x)**2 + (e.y-p.y)**2 < rr*rr) damagePlayer(e.dmg);
     }
 
-    if (e.hp <= 0){
+    if (e.hp <= 0 && !e.remote){
+      if (CO.on && CO.host) CO.dead.push(e.id);
       kills++;
       p.sigN++;
       if (MODE === 'rpg'){
@@ -2093,6 +2289,18 @@ function update(dt){
     if (NET.tickT <= 0){
       NET.tickT = 0.4;
       netSend({type:'tick', t:T, kills, lv:p.lv, hp:p.hp/p.maxHp, stacks:p.stacks});
+    }
+  }
+  if (CO.on && NET.live){
+    CO.sendT -= dt;
+    if (CO.sendT <= 0){
+      CO.sendT = CO.host ? 1/10 : 1/15;     // 主機的包大，送慢一點
+      if (CO.host) netSend(coSnapshot());
+      else {
+        netSend({type:'in', x:Math.round(p.x), y:Math.round(p.y),
+                 aim:+p.aim.toFixed(2), hp:p.hp/p.maxHp, lv:p.lv});
+        if (CO.hits.length){ netSend({type:'dmg', h:CO.hits.slice()}); CO.hits.length = 0; }
+      }
     }
   }
   if (banner){ banner.t += dt; if (banner.t > 2.6) banner = null; }
@@ -2730,6 +2938,27 @@ function draw(){
     ctx.globalAlpha = Math.max(0, 0.5 - (al.t % 1.6)/3.2);
     ctx.beginPath(); ctx.arc(0, 0, 20 + (al.t % 1.6)*26, 0, Math.PI*2);
     ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  // 隊友
+  if (CO.on) for (const mt of CO.mates.values()){
+    ctx.save();
+    ctx.translate(mt.x, mt.y);
+    ctx.globalAlpha = .9;
+    ctx.fillStyle = C.dian;
+    rrect(-12, -12, 24, 24, 5); ctx.fill();
+    ctx.fillStyle = 'rgba(244,239,226,.94)';
+    ctx.font = '700 13px "Noto Serif TC","Songti TC",serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('友', 0, 1);
+    ctx.globalAlpha = .8;
+    ctx.fillStyle = 'rgba(27,26,23,.18)'; ctx.fillRect(-16, -22, 32, 4);
+    ctx.fillStyle = C.zhu; ctx.fillRect(-16, -22, 32*Math.max(0, Math.min(1, mt.hp)), 4);
+    ctx.globalAlpha = .65;
+    ctx.font = '600 10px system-ui,sans-serif';
+    ctx.fillStyle = C.ink;
+    ctx.fillText(mt.name, 0, 26);
     ctx.restore(); ctx.globalAlpha = 1;
   }
 

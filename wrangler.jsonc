@@ -12,10 +12,14 @@
 
   // 對局房間。免費方案的 Durable Object 必須是 SQLite 版，所以用 new_sqlite_classes
   "durable_objects": {
-    "bindings": [{ "name": "ROOM", "class_name": "Room" }]
+    "bindings": [
+      { "name": "ROOM", "class_name": "Room" },
+      { "name": "DIR",  "class_name": "Directory" }
+    ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["Room"] }
+    { "tag": "v1", "new_sqlite_classes": ["Room"] },
+    { "tag": "v2", "new_sqlite_classes": ["Directory"] }
   ],
 
   "d1_databases": [
